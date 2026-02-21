@@ -23,8 +23,6 @@ app.add_middleware(
 # - files: list[str]
 # - size: str
 # - year: int
-#
-#
 class Dataset(BaseModel):
     id: str
     title: str
@@ -35,57 +33,74 @@ class Dataset(BaseModel):
 
 
 
-
+CMS_HTTP_DATASETS = [
+    {"id": "cms-001", "title": "Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B, TauPlusX dataset. Used in Higgs boson to two tau leptons analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-002", "title": "Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C, TauPlusX dataset. Used in Higgs boson to two tau leptons analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-003", "title": "GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion, decaying to two tau leptons.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-004", "title": "VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson production via vector boson fusion, decaying to two tau leptons.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-005", "title": "DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process, main background in Higgs to tau tau analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-006", "title": "TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production background sample.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "size": "720000000", "year": 2012},
+]
 
 # TODO 3: Create a DownloadStatus model with:
-# - filename: str
-# - status: str (pending, downloading, done, error)
-# - progress: float (0-100)
-#
 class DownloadStatus(BaseModel):
     filename: str
     status: str  # pending, downloading, done, error
     progress: float  # 0-100
 
 # TODO 4: Create a global dict to track download statuses
-# download_status = {}
-#
 download_status = {}
 
 
 # TODO 5: Write GET /datasets that:
-# - Hits https://opendata.cern.ch/api/records/?format=json
-# - Parses response
-# - Returns list of datasets
-#
-#
+#Add a experiment query parameter that filters by experiment. So the endpoint becomes:
+#GET /datasets?experiment=CMS
+#GET /datasets?experiment=ALICE
+#GET /datasets?experiment=all
+
+# from the url = https://opendata.cern.ch/api/records/?type=Dataset&experiment=CMS&file_type=root&page=1&size=20&format=json
+# change the above url to get datasets for ALICE and all experiments and CMS
+def convert_xrootd_to_http(uri: str) -> str:
+    if uri.startswith("root://eospublic.cern.ch//"):
+        return uri.replace("root://eospublic.cern.ch//", "https://eospublic.cern.ch/")
+    return uri
+
 @app.get("/datasets")
-async def get_datasets():
-    url = "https://opendata.cern.ch/api/records/?type=Dataset&file_type=root&page=1&size=10&format=json"
+async def get_datasets(experiment: str = "ALICE"):
+    if experiment == "CMS":
+        return [Dataset(**d) for d in CMS_HTTP_DATASETS]
+    
+    if experiment == "all":
+        url = "https://opendata.cern.ch/api/records/?type=Dataset&file_type=root&page=1&size=20&format=json&subtype=Collision"
+    else:
+        url = f"https://opendata.cern.ch/api/records/?type=Dataset&experiment={experiment}&file_type=root&page=1&size=20&format=json&subtype=Collision"
+    
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
         data = response.json()
         datasets = []
         for record in data.get("hits", {}).get("hits", []):
             metadata = record.get("metadata", {})
+            files = [
+                convert_xrootd_to_http(f.get("uri", ""))
+                for f in metadata.get("files", [])
+                if f.get("uri", "").endswith(".root")
+            ]
+            if not files:
+                continue
             dataset = Dataset(
                 id=str(record.get("id", "")),
                 title=metadata.get("title", ""),
                 description=metadata.get("abstract", {}).get("description", ""),
-                files=[f.get("uri", "") for f in metadata.get("files", []) if f.get("uri", "").endswith(".root")],
+                files=files,
                 size=str(sum(f.get("size", 0) for f in metadata.get("files", []))),
-                year=int(metadata.get("data_created", ["0"])[0]) if metadata.get("data_created") else 0,
+                year=int(metadata.get("date_created", ["0"])[0]) if metadata.get("date_created") else 0,
             )
             datasets.append(dataset)
         return datasets
-# - Accepts file URL and filename
-# - Creates ~/opencern/data/ if not exists
-# - Downloads file in background task
-# - Updates download_status as it progresses
-# - Returns immediately with status "pending"
-#
-    # Start background task to download file
-async def download_task():
+
+# TODO 6: Write POST /download that:
+async def download_task(file_url: str, filename: str):
     try:
         download_status[filename].status = "downloading"
         async with httpx.AsyncClient() as client:
@@ -116,14 +131,11 @@ async def start_download(file_url: str, filename: str, background_tasks: Backgro
     download_status[filename] = DownloadStatus(filename=filename, status="pending", progress=0.0)
 
     # Start background task to download file
-    background_tasks.add_task(download_task)
+    background_tasks.add_task(download_task, file_url, filename)
 
     return {"message": "Download started", "status": "pending"}
 
 # TODO 7: Write GET /download/status that:
-# - Accepts filename query param
-# - Returns current download status and progress
-#
 @app.get("/download/status")
 async def get_download_status(filename: str):
     status = download_status.get(filename)
@@ -133,8 +145,6 @@ async def get_download_status(filename: str):
         return {"error": "File not found in download status"}
 
 # TODO 8: Write GET /files that:
-# - Reads ~/opencern/data/
-# - Returns list of downloaded files with sizes
 @app.get("/files")
 async def list_files():
     data_dir = os.path.expanduser("~/opencern-datasets/data/")
@@ -148,9 +158,6 @@ async def list_files():
     return files
 
 # TODO 9: Write DELETE /files/{filename} that:
-# - Deletes file from ~/opencern/data/
-# - Removes from download_status dict
-
 @app.delete("/files/{filename}")
 async def delete_file(filename: str):
     file_path = os.path.expanduser(f"~/opencern-datasets/data/{filename}")
