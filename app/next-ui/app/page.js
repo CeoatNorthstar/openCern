@@ -57,6 +57,34 @@ const IconCheck = () => (
   </svg>
 );
 
+const IconDownloadsManager = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"></circle>
+    <polyline points="8 12 12 16 16 12"></polyline>
+    <line x1="12" y1="8" x2="12" y2="16"></line>
+  </svg>
+);
+
+const IconPause = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="6" y="4" width="4" height="16"></rect>
+    <rect x="14" y="4" width="4" height="16"></rect>
+  </svg>
+);
+
+const IconPlay = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+  </svg>
+);
+
+const IconX = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18"></line>
+    <line x1="6" y1="6" x2="18" y2="18"></line>
+  </svg>
+);
+
 const Logo = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -73,6 +101,67 @@ export default function App() {
   const [downloading, setDownloading] = useState({});
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
+  const [showDownloads, setShowDownloads] = useState(false);
+
+  const triggerDownloadAnimation = (e) => {
+    if (!e) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const el = document.createElement('div');
+    el.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+    el.style.position = 'fixed';
+    el.style.left = `${rect.left + rect.width / 2 - 10}px`;
+    el.style.top = `${rect.top + rect.height / 2 - 10}px`;
+    el.style.zIndex = '9999';
+    el.style.transition = 'all 0.6s cubic-bezier(0.25, 1, 0.5, 1)';
+    el.style.pointerEvents = 'none';
+    document.body.appendChild(el);
+
+    const targetEl = document.getElementById('download-manager-btn');
+    if (targetEl) {
+      const targetRect = targetEl.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          el.style.left = `${targetRect.left + targetRect.width / 2 - 10}px`;
+          el.style.top = `${targetRect.top + targetRect.height / 2 - 10}px`;
+          el.style.transform = 'scale(0.2)';
+          el.style.opacity = '0.5';
+        });
+      });
+    }
+    
+    setTimeout(() => {
+      document.body.removeChild(el);
+      if (targetEl) {
+        targetEl.style.transform = 'scale(1.05)';
+        targetEl.style.background = '#1e1e24';
+        setTimeout(() => {
+          targetEl.style.transform = 'scale(1)';
+          targetEl.style.background = 'transparent';
+        }, 150);
+      }
+    }, 600);
+  };
+
+  const pauseDownload = async (filename) => {
+    try {
+      await axios.post(`http://localhost:8080/download/pause?filename=${filename}`);
+      setDownloading(prev => prev[filename] ? { ...prev, [filename]: { ...prev[filename], status: 'paused' } } : prev);
+    } catch (e) { console.error(e); }
+  };
+
+  const resumeDownload = async (filename) => {
+    try {
+      await axios.post(`http://localhost:8080/download/resume?filename=${filename}`);
+      setDownloading(prev => prev[filename] ? { ...prev, [filename]: { ...prev[filename], status: 'downloading' } } : prev);
+    } catch (e) { console.error(e); }
+  };
+
+  const cancelDownload = async (filename) => {
+    try {
+      await axios.post(`http://localhost:8080/download/cancel?filename=${filename}`);
+      setDownloading(prev => { const n = { ...prev }; delete n[filename]; return n; });
+    } catch (e) { console.error(e); }
+  };
 
   useEffect(() => {
     // Add custom LM Studio-like scrollbar styles globally (only once)
@@ -115,10 +204,11 @@ export default function App() {
       
   }, [experiment]);
 
-  const handleDownload = async (dataset) => {
+  const handleDownload = async (dataset, e) => {
+    if (e) triggerDownloadAnimation(e);
     const file = dataset.files[0];
     const filename = file.split('/').pop();
-    setDownloading(prev => ({ ...prev, [filename]: 0 }));
+    setDownloading(prev => ({ ...prev, [filename]: { progress: 0, status: 'downloading', dataset } }));
 
     try {
       await axios.post(`http://localhost:8080/download?file_url=${encodeURIComponent(file)}&filename=${filename}`);
@@ -130,7 +220,15 @@ export default function App() {
       try {
         const res = await axios.get(`http://localhost:8080/download/status?filename=${filename}`);
         const { status, progress } = res.data;
-        setDownloading(prev => ({ ...prev, [filename]: progress }));
+        if (status === 'canceled') {
+          clearInterval(interval);
+          setDownloading(prev => { const n = { ...prev }; delete n[filename]; return n; });
+          return;
+        }
+        setDownloading(prev => {
+          if (!prev[filename]) return prev;
+          return { ...prev, [filename]: { ...prev[filename], progress, status } };
+        });
         if (status === 'done' || status === 'error') {
           clearInterval(interval);
           if (status === 'done') {
@@ -242,6 +340,105 @@ export default function App() {
 
         <div style={{ flex: 1 }} /> {/* Spacer */}
 
+        {/* Download Manager Button */}
+        <div style={{ position: 'relative', padding: '0 12px', marginBottom: '8px', WebkitAppRegion: 'no-drag' }}>
+          <button
+            id="download-manager-btn"
+            onClick={() => setShowDownloads(!showDownloads)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 500,
+              textAlign: 'left',
+              color: showDownloads ? '#ffffff' : '#9ca3af',
+              background: showDownloads ? '#1e1e24' : 'transparent',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (!showDownloads) {
+                e.currentTarget.style.color = '#e5e7eb';
+                e.currentTarget.style.background = '#18181d';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showDownloads) {
+                e.currentTarget.style.color = '#9ca3af';
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', opacity: showDownloads ? 1 : 0.7 }}>
+              <IconDownloadsManager />
+            </span>
+            Downloads
+            {Object.keys(downloading).length > 0 && (
+              <div style={{ width: 6, height: 6, background: '#3b82f6', borderRadius: '50%', marginLeft: 'auto', boxShadow: '0 0 4px #3b82f6' }} />
+            )}
+          </button>
+          
+          {/* Flyout */}
+          {showDownloads && (
+             <div style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: '20px',
+                width: '320px',
+                background: '#18181f',
+                border: '1px solid #2d2d34',
+                borderRadius: '8px',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                padding: '16px',
+                zIndex: 1000,
+                marginBottom: '8px'
+             }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#f3f4f6', marginBottom: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                  Download Manager
+                  <button onClick={() => setShowDownloads(false)} style={{ background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer' }}><IconX /></button>
+                </div>
+                {Object.keys(downloading).length === 0 ? (
+                   <div style={{ fontSize: '12px', color: '#6b7280', textAlign: 'center', padding: '16px 0' }}>No active downloads</div>
+                ) : (
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto' }}>
+                     {Object.entries(downloading).map(([fname, info]) => (
+                        <div key={fname} style={{ background: '#131317', padding: '12px', borderRadius: '6px', border: '1px solid #232328' }}>
+                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                             <div style={{ fontSize: '12px', color: '#d1d5db', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={info.dataset.title}>
+                               {info.dataset.title}
+                             </div>
+                             <div style={{ fontSize: '11px', color: '#9ca3af' }}>{info.progress.toFixed(0)}%</div>
+                           </div>
+                           <div style={{ height: '4px', background: '#232328', borderRadius: '2px', overflow: 'hidden', marginBottom: '10px' }}>
+                             <div style={{ height: '100%', width: `${info.progress}%`, background: info.status === 'paused' ? '#f59e0b' : '#3b82f6', transition: 'width 0.2s linear' }} />
+                           </div>
+                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                             {info.status === 'paused' ? (
+                               <button onClick={() => resumeDownload(fname)} style={{ background: '#232328', border: '1px solid #374151', color: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                                 <IconPlay />
+                               </button>
+                             ) : (
+                               <button onClick={() => pauseDownload(fname)} style={{ background: '#232328', border: '1px solid #374151', color: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                                 <IconPause />
+                               </button>
+                             )}
+                             <button onClick={() => cancelDownload(fname)} style={{ background: '#232328', border: '1px solid #374151', color: '#ef4444', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                               <IconX />
+                             </button>
+                           </div>
+                        </div>
+                     ))}
+                   </div>
+                )}
+             </div>
+          )}
+        </div>
+
         {/* Status indicator at bottom */}
         <div style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '10px', borderTop: '1px solid #232328', WebkitAppRegion: 'no-drag' }}>
           <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px rgba(16, 185, 129, 0.4)' }} />
@@ -326,7 +523,9 @@ export default function App() {
                   {datasets.map(d => {
                     const filename = d.files[0]?.split('/').pop();
                     const isDown = isDownloaded(d);
-                    const progress = downloading[filename];
+                    const dlInfo = downloading[filename];
+                    const progress = dlInfo ? dlInfo.progress : undefined;
+                    const status = dlInfo ? dlInfo.status : undefined;
                     const isSelected = selected?.id === d.id;
 
                     return (
@@ -385,16 +584,16 @@ export default function App() {
                             ) : progress !== undefined ? (
                               <div style={{ width: '100%' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#f3f4f6', marginBottom: '8px', fontWeight: 500 }}>
-                                  <span style={{ color: '#9ca3af' }}>Pulling</span>
+                                  <span style={{ color: status === 'paused' ? '#f59e0b' : '#9ca3af' }}>{status === 'paused' ? 'Paused' : 'Pulling'}</span>
                                   <span>{progress.toFixed(0)}%</span>
                                 </div>
                                 <div style={{ height: '3px', background: '#232328', borderRadius: '1.5px', overflow: 'hidden' }}>
-                                  <div style={{ height: '100%', width: `${progress}%`, background: '#3b82f6', borderRadius: '1.5px', transition: 'width 0.2s linear' }} />
+                                  <div style={{ height: '100%', width: `${progress}%`, background: status === 'paused' ? '#f59e0b' : '#3b82f6', borderRadius: '1.5px', transition: 'width 0.2s linear' }} />
                                 </div>
                               </div>
                             ) : (
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleDownload(d); }}
+                                onClick={(e) => { e.stopPropagation(); handleDownload(d, e); }}
                                 style={{
                                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                                   width: '100%', padding: '8px 0', borderRadius: '4px',

@@ -51,6 +51,8 @@ class DownloadStatus(BaseModel):
 # TODO 4: Create a global dict to track download statuses
 download_status = {}
 
+cancelled_downloads = set()
+
 
 # TODO 5: Write GET /datasets that:
 #Add a experiment query parameter that filters by experiment. So the endpoint becomes:
@@ -109,8 +111,7 @@ async def download_task(file_url: str, filename: str):
             downloaded_size = 0
 
             async with aiofiles.open(os.path.expanduser(f"~/opencern-datasets/data/{filename}"), "wb") as f:
-                async for chunk in response.iter_bytes():
-
+                async for chunk in response.aiter_bytes():
                     await f.write(chunk)
                     downloaded_size += len(chunk)
                     if total_size > 0:
@@ -134,6 +135,23 @@ async def start_download(file_url: str, filename: str, background_tasks: Backgro
     background_tasks.add_task(download_task, file_url, filename)
 
     return {"message": "Download started", "status": "pending"}
+
+@app.post("/download/cancel")
+async def cancel_download(filename: str):
+    cancelled_downloads.add(filename)
+    if filename in download_status:
+        download_status[filename].status = "cancelled"
+    return {"message": f"Download of {filename} cancelled"}
+
+@app.post("/download/resume")
+async def resume_download(file_url: str, filename: str, background_tasks: BackgroundTasks):
+    if filename in cancelled_downloads:
+        cancelled_downloads.remove(filename)
+        download_status[filename] = DownloadStatus(filename=filename, status="pending", progress=0.0)
+        background_tasks.add_task(download_task, file_url, filename)
+        return {"message": f"Download of {filename} resumed"}
+    else:
+        return {"error": f"No cancelled download found for {filename}"}
 
 # TODO 7: Write GET /download/status that:
 @app.get("/download/status")
