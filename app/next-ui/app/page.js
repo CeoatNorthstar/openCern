@@ -92,10 +92,22 @@ export default function App() {
 
     setLoading(true);
     // Fetch depending on the selected experiment
-    const expParam = experiment === 'Alice' ? 'ALICE' : experiment === 'All' ? 'all' : experiment;
-    axios.get(`http://localhost:8080/datasets?experiment=${expParam}`)
-      .then(r => { setDatasets(r.data); setLoading(false); })
-      .catch(() => setLoading(false));
+    if (experiment === 'All') {
+      Promise.all([
+        axios.get('http://localhost:8080/datasets?experiment=ALICE'),
+        axios.get('http://localhost:8080/datasets?experiment=CMS')
+      ])
+        .then(([resAlice, resCms]) => {
+          setDatasets([...resAlice.data, ...resCms.data]);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    } else {
+      const expParam = experiment === 'Alice' ? 'ALICE' : experiment;
+      axios.get(`http://localhost:8080/datasets?experiment=${expParam}`)
+        .then(r => { setDatasets(r.data); setLoading(false); })
+        .catch(() => setLoading(false));
+    }
 
     axios.get('http://localhost:8080/files')
       .then(r => setDownloaded(r.data))
