@@ -92,7 +92,8 @@ export default function App() {
 
     setLoading(true);
     // Fetch depending on the selected experiment
-    axios.get(`http://localhost:8080/datasets?experiment=${experiment === 'Alice' ? 'ALICE' : experiment}`)
+    const expParam = experiment === 'Alice' ? 'ALICE' : experiment === 'All' ? 'all' : experiment;
+    axios.get(`http://localhost:8080/datasets?experiment=${expParam}`)
       .then(r => { setDatasets(r.data); setLoading(false); })
       .catch(() => setLoading(false));
 
