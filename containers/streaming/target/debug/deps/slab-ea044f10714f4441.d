@@ -1,0 +1,8 @@
+/Users/icon/opencern/containers/streaming/target/debug/deps/slab-ea044f10714f4441.d: /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/lib.rs /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/builder.rs
+
+/Users/icon/opencern/containers/streaming/target/debug/deps/libslab-ea044f10714f4441.rlib: /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/lib.rs /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/builder.rs
+
+/Users/icon/opencern/containers/streaming/target/debug/deps/libslab-ea044f10714f4441.rmeta: /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/lib.rs /Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/builder.rs
+
+/Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/lib.rs:
+/Users/icon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/slab-0.4.12/src/builder.rs:
