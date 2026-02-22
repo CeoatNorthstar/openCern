@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.2.9",
+    "@deck.gl/layers": "^9.2.9",
+    "@deck.gl/react": "^9.2.9",
     "axios": "^1.13.5",
     "next": "16.1.6",
     "react": "19.2.3",

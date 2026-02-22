@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
-import * as THREE from 'three';
-import { OrbitControls } from 'three-stdlib';
+import DeckGL from '@deck.gl/react';
+import { LineLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { OrbitView } from '@deck.gl/core';
 
 const formatSize = (bytes) => {
   if (!bytes) return 'Unknown';
@@ -156,289 +157,287 @@ const Logo = () => (
   </svg>
 );
 
-const ParticleVisualization = () => {
-  const mountRef = useRef(null);
+const hexToRgb = (hex) => {
+  const c = parseInt(hex.replace('#', ''), 16);
+  return [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+};
+
+const ParticleVisualization = ({ filename }) => {
+  const [events, setEvents] = useState([]);
+  const [currentEventIndex, setCurrentEventIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
   const wsRef = useRef(null);
-  const sceneRef = useRef(null);
-  const particlesGroupRef = useRef(null);
-  const flashRef = useRef(null);
-  
-  const [stats, setStats] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(true);
+
+  // DeckGL Initial View State
+  const [viewState, setViewState] = useState({
+    target: [0, 0, 0],
+    orbitAxis: 'Z',
+    rotationX: 30,
+    rotationOrbit: 45,
+    zoom: 0.5
+  });
 
   useEffect(() => {
-    if (!mountRef.current) return;
-    
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-    
-    const camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 100000);
-    // Position camera to see the cylinder nicely
-    camera.position.set(250, 200, 350);
-    
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    mountRef.current.appendChild(renderer.domElement);
-    
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.5;
-    
-    // CMS Detector Wireframe
-    const detColor = 0x1e2d45;
-    // Barrel (Z is beamline, so orient cylinder along Z axis)
-    const barrelGeom = new THREE.CylinderGeometry(200, 200, 600, 32, 1, true);
-    barrelGeom.rotateX(Math.PI / 2);
-    const barrelMat = new THREE.MeshBasicMaterial({ color: detColor, wireframe: true, transparent: true, opacity: 0.3 });
-    const barrel = new THREE.Mesh(barrelGeom, barrelMat);
-    scene.add(barrel);
+    if (!filename) return;
+    setLoading(true);
+    setEvents([]);
+    setProgress(0);
+    setCurrentEventIndex(0);
 
-    // Endcaps
-    const endcapGeom = new THREE.CircleGeometry(200, 32);
-    const endcapMat = new THREE.MeshBasicMaterial({ color: detColor, wireframe: true, transparent: true, opacity: 0.3 });
-    const endcap1 = new THREE.Mesh(endcapGeom, endcapMat);
-    endcap1.position.z = 300;
-    scene.add(endcap1);
-    
-    const endcap2 = new THREE.Mesh(endcapGeom, endcapMat);
-    endcap2.position.z = -300;
-    endcap2.rotation.y = Math.PI;
-    scene.add(endcap2);
-
-    // Central collision sphere
-    const centerGeom = new THREE.SphereGeometry(2, 16, 16);
-    const centerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
-    const centerSphere = new THREE.Mesh(centerGeom, centerMat);
-    scene.add(centerSphere);
-
-    // Flash animation mesh
-    const flashGeom = new THREE.SphereGeometry(1, 32, 32);
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
-    const flashMesh = new THREE.Mesh(flashGeom, flashMat);
-    scene.add(flashMesh);
-    flashRef.current = flashMesh;
-
-    const particlesGroup = new THREE.Group();
-    scene.add(particlesGroup);
-    particlesGroupRef.current = particlesGroup;
-
-    let animationFrameId;
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-      
-      // Flash animation logic
-      if (flashRef.current && flashRef.current.material.opacity > 0) {
-        flashRef.current.scale.addScalar(0.8);
-        flashRef.current.material.opacity -= 0.05;
-      }
-
-      // Shoot particles outward (scale from 0 to 1)
-      if (particlesGroupRef.current) {
-        particlesGroupRef.current.children.forEach(child => {
-          if (child.scale.x < 1.0) {
-            const inc = 0.05;
-            child.scale.set(
-              Math.min(1.0, child.scale.x + inc),
-              Math.min(1.0, child.scale.y + inc),
-              Math.min(1.0, child.scale.z + inc)
-            );
-          }
-        });
-      }
-    };
-    animate();
-
-    const handleResize = () => {
-      if (!mountRef.current) return;
-      camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameId);
-      if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
-      renderer.dispose();
-      scene.clear();
-    };
-  }, []);
-
-  useEffect(() => {
     let ws = new WebSocket('ws://127.0.0.1:9001');
     wsRef.current = ws;
+
+    let loadedEvents = [];
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ action: 'load', file: filename }));
+    };
+
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        renderEvent(data);
-      } catch(e) { console.error(e); }
+        if (data.eof) {
+          setLoading(false);
+          setEvents(loadedEvents);
+          ws.close();
+        } else if (data.error) {
+          console.error("Stream error:", data.error);
+          setLoading(false);
+          ws.close();
+        } else {
+          loadedEvents.push(data);
+          setProgress(loadedEvents.length);
+        }
+      } catch (e) {
+        console.error(e);
+      }
     };
+
     return () => {
-      if (ws.readyState === WebSocket.OPEN) ws.close();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
     };
+  }, [filename]);
+
+  const detectorLines = useMemo(() => {
+    const lines = [];
+    const segments = 32;
+    const radius = 200;
+    const zOffset = 300;
+    for (let i = 0; i < segments; i++) {
+      const theta1 = (i / segments) * Math.PI * 2;
+      const theta2 = ((i + 1) / segments) * Math.PI * 2;
+
+      // Circle +Z
+      lines.push({ source: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, zOffset], target: [Math.cos(theta2) * radius, Math.sin(theta2) * radius, zOffset] });
+      // Circle -Z
+      lines.push({ source: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, -zOffset], target: [Math.cos(theta2) * radius, Math.sin(theta2) * radius, -zOffset] });
+      // Connecting lines across Z
+      lines.push({ source: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, zOffset], target: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, -zOffset] });
+      // Inner spokes to center axis for visual reference
+      lines.push({ source: [0, 0, zOffset], target: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, zOffset] });
+      lines.push({ source: [0, 0, -zOffset], target: [Math.cos(theta1) * radius, Math.sin(theta1) * radius, -zOffset] });
+    }
+    return lines;
   }, []);
 
-  useEffect(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(isPlaying ? 'play' : 'pause');
-    }
-  }, [isPlaying]);
+  const stats = events[currentEventIndex] || null;
 
-  const renderEvent = (data) => {
-    setStats({
-      index: data.index,
-      ht: data.ht,
-      met: data.met,
-      counts: data.particles.reduce((acc, p) => {
-        acc[p.type] = (acc[p.type] || 0) + 1;
-        return acc;
-      }, {})
+  const getLayers = () => {
+    if (!stats) return [];
+
+    const layers = [];
+
+    // Detector Wireframe
+    layers.push(
+      new LineLayer({
+        id: 'detector-wireframe',
+        data: detectorLines,
+        getSourcePosition: d => d.source,
+        getTargetPosition: d => d.target,
+        getColor: [30, 45, 69, 100], // #1e2d45
+        getWidth: 1,
+        widthUnits: 'pixels'
+      })
+    );
+
+    const particleData = stats.particles.map(p => {
+      let factor = 1.0;
+      let width = 2;
+      if (p.type === 'muon') { factor = 1.0; width = 3; }
+      else if (p.type === 'electron') { factor = 0.6; width = 2; }
+      else if (p.type === 'jet') { factor = 0.4; width = 6; }
+      else if (p.type === 'tau') { factor = 0.5; width = 2; }
+      else if (p.type === 'photon') { factor = 0.6; width = 1; }
+
+      // Custom length expansion for standard OpenCERN physics tuples
+      const scale = (p.energy / 100.0) * factor * 1000;
+
+      return {
+        sourcePosition: [0, 0, 0],
+        targetPosition: [p.px * scale, p.py * scale, p.pz * scale],
+        color: hexToRgb(p.color),
+        width: width
+      };
     });
 
-    const group = particlesGroupRef.current;
-    if (!group) return;
+    layers.push(
+      new LineLayer({
+        id: 'particle-tracks',
+        data: particleData,
+        getSourcePosition: d => d.sourcePosition,
+        getTargetPosition: d => d.targetPosition,
+        getColor: d => d.color,
+        getWidth: d => d.width,
+        widthUnits: 'pixels'
+      })
+    );
 
-    // Clear old
-    while(group.children.length > 0){ 
-      const child = group.children[0];
-      group.remove(child);
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) {
-        if (Array.isArray(child.material)) {
-           child.material.forEach(m => m.dispose());
-        } else {
-           child.material.dispose();
-        }
-      }
+    // Vertex Point
+    layers.push(
+      new ScatterplotLayer({
+        id: 'vertex-point',
+        data: [{ position: [0, 0, 0] }],
+        getPosition: d => d.position,
+        getFillColor: [255, 255, 255, 200],
+        getRadius: 8,
+        radiusUnits: 'pixels'
+      })
+    );
+
+    if (stats.met_vector) {
+      const { pt, phi } = stats.met_vector;
+      let metLength = pt * 0.01;
+      if (metLength > 300) metLength = 300; // Cap
+      layers.push(
+        new LineLayer({
+          id: 'met-arrow',
+          data: [{ source: [0, 0, 0], target: [metLength * Math.cos(phi), metLength * Math.sin(phi), 0] }],
+          getSourcePosition: d => d.source,
+          getTargetPosition: d => d.target,
+          getColor: [255, 107, 53, 255],
+          getWidth: 4,
+          widthUnits: 'pixels'
+        })
+      );
     }
 
-    // Trigger flash animation
-    if (flashRef.current) {
-      flashRef.current.scale.set(1, 1, 1);
-      flashRef.current.material.opacity = 1.0;
-    }
+    return layers;
+  };
 
-    // Colors mapping
-    const typeColors = {
-      muon: 0xff6b6b,
-      electron: 0x7fbbb3,
-      jet: 0xdbbc7f,
-      tau: 0xd699b6,
-      photon: 0xffffff
-    };
-
-      // Add new particles
-    data.particles.forEach(p => {
-      const vec = new THREE.Vector3(p.px, p.py, p.pz);
-      const pt = Math.sqrt(p.px*p.px + p.py*p.py);
-      const energy_scale = Math.min(pt * 2.0, 100); 
-      const dir = vec.clone().normalize();
-      
-      let colorNum = typeColors[p.type] || 0xffffff;
-      
-      let drawLength = 100;
-      if (p.type === 'muon') drawLength = 220 + energy_scale;
-      else if (p.type === 'electron' || p.type === 'photon') drawLength = 130 + energy_scale * 0.5;
-      else if (p.type === 'jet') drawLength = 80 + energy_scale;
-      else if (p.type === 'tau') drawLength = 150 + energy_scale * 0.7;
-
-      const endPoint = dir.multiplyScalar(drawLength);
-      
-      if (p.type === 'jet') {
-        const coneGeom = new THREE.ConeGeometry(drawLength * 0.15, drawLength, 12);
-        coneGeom.translate(0, drawLength/2, 0);
-        coneGeom.rotateX(Math.PI / 2);
-        
-        const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0.8 });
-        const mesh = new THREE.Mesh(coneGeom, coneMat);
-        mesh.lookAt(endPoint);
-        mesh.scale.set(0.01, 0.01, 0.01);
-        group.add(mesh);
-      } else {
-        const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), endPoint.clone()]);
-        const lineMat = new THREE.LineBasicMaterial({ color: colorNum, transparent: true, opacity: 0.9, linewidth: p.type==='muon'? 2 : 1 });
-        const line = new THREE.Line(lineGeom, lineMat);
-        line.scale.set(0.01, 0.01, 0.01);
-        group.add(line);
+  const jumpToMaxHt = () => {
+    if (events.length === 0) return;
+    let maxHt = -1;
+    let maxIdx = 0;
+    events.forEach((e, idx) => {
+      if (e.ht > maxHt) {
+        maxHt = e.ht;
+        maxIdx = idx;
       }
     });
-
-    // Draw MET
-    if (data.met_vector) {
-      const { pt, phi } = data.met_vector;
-      const met_px = pt * Math.cos(phi);
-      const met_py = pt * Math.sin(phi);
-      const metDir = new THREE.Vector3(met_px, met_py, 0).normalize();
-      // Arrow properties
-      const arrowLength = 150;
-      const hex = 0xff6b35;
-      const arrowHelper = new THREE.ArrowHelper(metDir, new THREE.Vector3(0,0,0), arrowLength, hex, 20, 10);
-      
-      // Make line dashed
-      if (arrowHelper.line) {
-        const dashedMat = new THREE.LineDashedMaterial({ color: hex, dashSize: 5, gapSize: 5 });
-        arrowHelper.line.material = dashedMat;
-        arrowHelper.line.computeLineDistances();
-      }
-      arrowHelper.scale.set(0.01, 0.01, 0.01);
-      group.add(arrowHelper);
-    }
+    setCurrentEventIndex(maxIdx);
   };
 
-  const togglePlay = () => setIsPlaying(prev => !prev);
+  if (loading) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%', background: '#080b14', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+        <div style={{ fontSize: '16px', color: '#f3f4f6', fontFamily: 'var(--font-geist-mono), monospace', marginBottom: '16px' }}>
+          Loading events... {progress} / 5000
+        </div>
+        <div style={{ width: '300px', height: '4px', background: '#232328', borderRadius: '2px', overflow: 'hidden' }}>
+          <div style={{ height: '100%', background: '#00d4ff', width: `${(progress / 5000) * 100}%`, transition: 'width 0.1s linear' }} />
+        </div>
+      </div>
+    );
+  }
 
-  // Stats color dots
-  const typeDots = {
-    muon: '#ff6b6b',
-    electron: '#7fbbb3',
-    jet: '#dbbc7f',
-    tau: '#d699b6',
-    photon: '#ffffff'
-  };
+  const particleCounts = stats ? stats.particles.reduce((acc, p) => {
+    acc[p.type] = (acc[p.type] || 0) + 1;
+    return acc;
+  }, {}) : {};
+
+  const typeDots = { muon: '#ff6b6b', electron: '#7fbbb3', jet: '#dbbc7f', tau: '#d699b6', photon: '#ffffff' };
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#080b14', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1f2937' }}>
-      <div ref={mountRef} style={{ width: '100%', height: '100%', cursor: 'grab' }} onMouseDown={e => e.currentTarget.style.cursor='grabbing'} onMouseUp={e => e.currentTarget.style.cursor='grab'} />
+      <DeckGL
+        views={new OrbitView({ id: 'orbit-view' })}
+        viewState={viewState}
+        onViewStateChange={({ viewState }) => setViewState(viewState)}
+        controller={true}
+        layers={getLayers()}
+        style={{ width: '100%', height: '100%' }}
+      />
       
-      {/* HUD Overlay - Bottom Left */}
-      <div style={{ position: 'absolute', bottom: '24px', left: '24px', background: 'rgba(19, 19, 23, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid #232328', borderRadius: '8px', padding: '16px', minWidth: '240px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', zIndex: 5 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#f3f4f6', margin: 0, letterSpacing: '0.5px' }}>
-            EVENT {stats ? stats.index : '---'} <span style={{ color: '#6b7280', fontSize: '11px', fontWeight: 400 }}>/ 5000</span>
-          </h3>
-          {/* Play/Pause inside HUD */}
-          <button onClick={togglePlay} style={{ background: isPlaying ? 'rgba(59,130,246,0.1)' : '#3b82f6', color: isPlaying ? '#3b82f6' : '#fff', border: isPlaying ? '1px solid rgba(59,130,246,0.3)' : 'border:none', borderRadius: '4px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
-            {isPlaying ? <IconPause /> : <IconPlay />}
-          </button>
-        </div>
-        
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px', fontSize: '12px' }}>
-          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px', borderRadius: '6px' }}>
-            <div style={{ color: '#9ca3af', marginBottom: '4px', fontSize: '10px', letterSpacing: '0.5px' }}>HT (GeV)</div>
-            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{stats ? stats.ht.toFixed(1) : '---'}</div>
+      {/* Stats Overlay - Top Right */}
+      <div style={{ position: 'absolute', top: '24px', right: '24px', background: 'rgba(13, 17, 23, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid #1e2d45', borderRadius: '8px', padding: '16px', minWidth: '240px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', zIndex: 5, fontFamily: 'var(--font-geist-mono), monospace' }}>
+        <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 16px 0', letterSpacing: '0.5px' }}>
+          EVENT METRICS
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px', fontSize: '12px' }}>
+          <div>
+            <div style={{ color: '#dbbc7f', marginBottom: '2px' }}>HT (GeV)</div>
+            <div style={{ color: '#d1d5db', fontWeight: 500 }}>{stats ? stats.ht.toFixed(1) : '---'}</div>
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px', borderRadius: '6px' }}>
-            <div style={{ color: '#ff6b35', marginBottom: '4px', fontSize: '10px', letterSpacing: '0.5px' }}>MET (GeV)</div>
-            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{stats ? stats.met.toFixed(1) : '---'}</div>
+          <div>
+            <div style={{ color: '#ff6b35', marginBottom: '2px' }}>MET (GeV)</div>
+            <div style={{ color: '#d1d5db', fontWeight: 500 }}>{stats ? stats.met.toFixed(1) : '---'}</div>
+          </div>
+          <div>
+            <div style={{ color: '#00d4ff', marginBottom: '2px' }}>B-Jets</div>
+            <div style={{ color: '#d1d5db', fontWeight: 500 }}>{stats ? stats.n_bjets : '0'}</div>
+          </div>
+          <div>
+            <div style={{ color: '#f3f4f6', marginBottom: '2px' }}>Lead Lep pT</div>
+            <div style={{ color: '#d1d5db', fontWeight: 500 }}>{stats ? stats.leading_lepton_pt.toFixed(1) : '---'}</div>
           </div>
         </div>
-        
-        <div style={{ borderTop: '1px solid #232328', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-          {stats ? Object.entries(stats.counts).map(([type, count]) => (
+        <div style={{ borderTop: '1px solid #1e2d45', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+          {Object.entries(particleCounts).map(([type, count]) => (
             <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: typeDots[type] || '#fff' }} />
                 <span style={{ color: '#9ca3af', textTransform: 'capitalize' }}>{type}s</span>
               </div>
-              <span style={{ color: '#f3f4f6', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{count}</span>
+              <span style={{ color: '#f3f4f6', fontWeight: 500 }}>{count}</span>
             </div>
-          )) : <div style={{ color: '#6b7280', fontStyle: 'italic', fontSize: '11px' }}>Waiting for collision data...</div>}
+          ))}
+        </div>
+      </div>
+
+      {/* Scrubber Navigation Overlay - Bottom Center */}
+      <div style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: 'rgba(13, 17, 23, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid #1e2d45', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', width: '500px', zIndex: 10, fontFamily: 'var(--font-geist-mono), monospace' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#f3f4f6', fontSize: '12px' }}>
+          <span>Event {stats ? stats.index : '---'} / 5000</span>
+          <button onClick={jumpToMaxHt} style={{ background: '#1e2d45', color: '#f3f4f6', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            ⚡ Highest HT
+          </button>
+        </div>
+        <input 
+          type="range" 
+          min="0" 
+          max={events.length - 1} 
+          value={currentEventIndex} 
+          onChange={(e) => setCurrentEventIndex(parseInt(e.target.value))}
+          style={{ width: '100%', cursor: 'pointer', accentColor: '#00d4ff' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <button 
+            disabled={currentEventIndex <= 0} 
+            onClick={() => setCurrentEventIndex(prev => prev - 1)}
+            style={{ background: 'transparent', color: currentEventIndex <= 0 ? '#6b7280' : '#00d4ff', border: '1px solid #1e2d45', padding: '6px 16px', borderRadius: '4px', cursor: currentEventIndex <= 0 ? 'not-allowed' : 'pointer' }}
+          >
+            Previous
+          </button>
+          <button 
+            disabled={currentEventIndex >= events.length - 1} 
+            onClick={() => setCurrentEventIndex(prev => prev + 1)}
+            style={{ background: 'transparent', color: currentEventIndex >= events.length - 1 ? '#6b7280' : '#00d4ff', border: '1px solid #1e2d45', padding: '6px 16px', borderRadius: '4px', cursor: currentEventIndex >= events.length - 1 ? 'not-allowed' : 'pointer' }}
+          >
+            Next
+          </button>
         </div>
       </div>
     </div>
@@ -455,6 +454,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
+  const [visualizeFile, setVisualizeFile] = useState(null);
   
   // Inspector states
   const [expandedFiles, setExpandedFiles] = useState({});
@@ -1200,18 +1200,30 @@ export default function App() {
                             borderLeft: '2px solid #3b82f6',
                             animation: 'slideIn 0.2s ease-out'
                           }}
-                          onClick={() => openInspector(f.filename, 1)}
                           onMouseEnter={(e) => e.currentTarget.style.background = '#1e1e24'}
                           onMouseLeave={(e) => e.currentTarget.style.background = '#18181f'}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }} onClick={() => openInspector(f.filename, 1)}>
                               <div style={{ color: '#3b82f6' }}><IconDatabase /></div>
                               <div style={{ fontFamily: 'var(--font-geist-mono), monospace', fontSize: '13px', color: '#d1d5db' }}>
                                 {f.filename.replace('.root', '.json')}
                               </div>
                             </div>
-                            <div style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 8px', borderRadius: '4px', fontWeight: 600, letterSpacing: '0.5px' }}>
-                              PROCESSED DATA
+                            
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setVisualizeFile(f.filename.replace('.root', '.json'));
+                                  setActiveTab('visualize');
+                                }}
+                                style={{ background: '#00d4ff', border: 'none', color: '#080b14', padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                Visualize 3D
+                              </button>
+                              <div style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 8px', borderRadius: '4px', fontWeight: 600, letterSpacing: '0.5px' }}>
+                                PROCESSED DATA
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1310,7 +1322,13 @@ export default function App() {
           {/* Visualize Tab */}
           {activeTab === 'visualize' && (
             <div style={{ height: 'calc(100% - 60px)' }}>
-              <ParticleVisualization />
+              {visualizeFile ? (
+                <ParticleVisualization filename={visualizeFile} />
+              ) : (
+                <div style={{ position: 'relative', width: '100%', height: '100%', background: '#080b14', borderRadius: '8px', border: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>
+                  Please select a processed JSON dataset from the Local Storage tab to visualize.
+                </div>
+              )}
             </div>
           )}
 

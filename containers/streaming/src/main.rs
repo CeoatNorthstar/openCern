@@ -44,63 +44,45 @@ async fn main() {
                     .expect("WebSocket handshake failed");
 
                 let (mut sender, mut receiver) = ws_stream.split();
-                let (tx, mut rx) = mpsc::channel::<String>(32);
-
-                tokio::spawn(async move {
-                    while let Some(Ok(msg)) = receiver.next().await {
-                        if let Message::Text(text) = msg {
-                            let _ = tx.send(text.to_string()).await;
-                        }
-                    }
-                });
-
-                let home = std::env::var("HOME").unwrap();
-                let processed_dir = format!("{}/opencern-datasets/processed/", home);
-
-                let entries = fs::read_dir(&processed_dir).expect("Cannot read processed dir");
-                let mut json_file: Option<String> = None;
-
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        let path = entry.path();
-                        if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                            json_file = Some(path.to_str().unwrap().to_string());
-                            break;
-                        }
-                    }
-                }
-
-                if let Some(filepath) = json_file {
-                    println!("Streaming {}", filepath);
-                    let content = fs::read_to_string(&filepath).expect("Cannot read file");
-                    let data: Value = serde_json::from_str(&content).expect("Invalid JSON");
-
-                    if let Some(events) = data["events"].as_array() {
-                        let mut is_playing = true;
-                        let mut event_idx = 0;
-
-                        loop {
-                            while let Ok(cmd) = rx.try_recv() {
-                                if cmd == "pause" {
-                                    is_playing = false;
-                                } else if cmd == "play" {
-                                    is_playing = true;
-                                }
-                            }
-
-                            if is_playing {
-                                if event_idx < events.len() {
-                                    let msg = serde_json::to_string(&events[event_idx]).unwrap();
-                                    if sender.send(Message::Text(msg.into())).await.is_err() {
-                                        break; // Client disconnected
+                
+                // Wait for the first message to be a load command
+                while let Some(Ok(msg)) = receiver.next().await {
+                    if let Message::Text(text) = msg {
+                        if let Ok(cmd) = serde_json::from_str::<Value>(&text) {
+                            if cmd["action"] == "load" {
+                                if let Some(filename) = cmd["file"].as_str() {
+                                    let home = std::env::var("HOME").unwrap();
+                                    let stem = filename.strip_suffix(".root").unwrap_or(filename);
+                                    let stem = stem.strip_suffix(".json").unwrap_or(stem);
+                                    let filepath = format!("{}/opencern-datasets/processed/{}.json", home, stem);
+                                    
+                                    println!("Client requested stream for {}", filepath);
+                                    
+                                    match fs::read_to_string(&filepath) {
+                                        Ok(content) => {
+                                            if let Ok(data) = serde_json::from_str::<Value>(&content) {
+                                                if let Some(events) = data["events"].as_array() {
+                                                    println!("Streaming {} events...", events.len());
+                                                    for event in events {
+                                                        let msg_str = serde_json::to_string(event).unwrap();
+                                                        if sender.send(Message::Text(msg_str.into())).await.is_err() {
+                                                            break; // Client disconnected
+                                                        }
+                                                    }
+                                                    // Send EOF marker
+                                                    let _ = sender.send(Message::Text(serde_json::json!({"eof": true}).to_string().into())).await;
+                                                    let _ = sender.close().await;
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("Error reading file: {}", e);
+                                            let _ = sender.send(Message::Text(serde_json::json!({"error": "File not found"}).to_string().into())).await;
+                                        }
                                     }
-                                    event_idx += 1;
-                                } else {
-                                    // Loop back to start for endless streaming 
-                                    event_idx = 0;
                                 }
+                                break; // Only process one load command per connection
                             }
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                         }
                     }
                 }
