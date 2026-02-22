@@ -230,6 +230,20 @@ export default function ParticleVisualization({ filename }) {
     const layers = [];
     const elapsed = now - eventChangeTimeRef.current;
     
+    // 0. Clouded Meshed Cylinder
+    layers.push(new ColumnLayer({
+      id: 'detector-solid',
+      data: [{ position: [0, 0] }],
+      diskResolution: 48,
+      radius: 220,
+      extruded: true,
+      getElevation: 700,
+      getFillColor: [40, 80, 120, 35], // Clouded see-through blue solid
+      elevationScale: 1,
+      modelMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -350, 1],
+      parameters: { depthTest: true, depthWrite: false }
+    }));
+
     // 1. Static Detector (Concentric Wireframes)
     // depthWrite: false ensures the cylinder wireframe acts purely visually and never clips particles
     layers.push(new LineLayer({
@@ -314,7 +328,19 @@ export default function ParticleVisualization({ filename }) {
                 let ty = p.py * currentScale;
                 let tz = p.pz * currentScale;
                 
-                // Uncapped tracks allow particles to spray outside the cylinder shell fully
+                // Cap strictly to the tracking cylinder (R=220, Z=±350) as requested
+                const r_xy = Math.sqrt(tx*tx + ty*ty);
+                if (r_xy > 220) {
+                    const scale = 220 / r_xy;
+                    tx *= scale; ty *= scale; tz *= scale;
+                }
+                if (tz > 350) {
+                    const scale = 350 / tz;
+                    tx *= scale; ty *= scale; tz *= scale;
+                } else if (tz < -350) {
+                    const scale = -350 / tz;
+                    tx *= scale; ty *= scale; tz *= scale;
+                }
                 const r = Math.sqrt(tx*tx + ty*ty + tz*tz);
 
                 if (isJet && p.jetLines) {
@@ -490,7 +516,7 @@ export default function ParticleVisualization({ filename }) {
            onWheel={() => lastInteractionRef.current = Date.now()}
            onKeyDown={() => lastInteractionRef.current = Date.now()} >
           <DeckGL
-            views={new OrbitView({ id: 'orbit-view' })}
+            views={new OrbitView({ id: 'orbit-view', orbitAxis: 'Y' })}
             viewState={viewState}
             onViewStateChange={({ viewState }) => { lastInteractionRef.current = Date.now(); setViewState(viewState); }}
             controller={{ doubleClickZoom: false, touchRotate: true }}
