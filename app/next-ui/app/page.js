@@ -257,6 +257,13 @@ const ParticleVisualization = () => {
     };
   }, []);
 
+  useEffect(() => {
+    // Send play/pause depending on isPlaying state
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(isPlaying ? 'play' : 'pause');
+    }
+  }, [isPlaying]);
+
   const renderEvent = (data) => {
     setStats({
       index: data.index,
@@ -285,20 +292,24 @@ const ParticleVisualization = () => {
 
     // Add new particles
     data.particles.forEach(p => {
-      const vec = new THREE.Vector3(p.px, p.py, p.pz);
+      // px, py, pz are momentum vectors, scale them for visual length
+      const vec = new THREE.Vector3(p.px, p.py, p.pz).multiplyScalar(2.0);
       const length = vec.length();
-      // normalize
       const dir = vec.clone().normalize();
       
       let colorNum = parseInt(p.color.replace('#', '0x'), 16);
       
       if (p.type === 'jet') {
-        const coneGeom = new THREE.ConeGeometry(0.5, Math.min(length, 20), 8);
-        coneGeom.translate(0, Math.min(length, 20)/2, 0);
+        const coneGeom = new THREE.ConeGeometry(0.5, Math.min(length, 40), 8);
+        coneGeom.translate(0, Math.min(length, 40)/2, 0);
         coneGeom.rotateX(Math.PI / 2);
+        
         const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0 });
         const mesh = new THREE.Mesh(coneGeom, coneMat);
-        mesh.lookAt(dir);
+        
+        // Orient the cone along the momentum vector
+        const target = vec.clone().add(new THREE.Vector3(0,0,0));
+        mesh.lookAt(target);
         group.add(mesh);
       } else {
         const points = [new THREE.Vector3(0,0,0), vec];
@@ -311,11 +322,7 @@ const ParticleVisualization = () => {
   };
 
   const togglePlay = () => {
-    const next = !isPlaying;
-    setIsPlaying(next);
-    if(wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(next ? 'play' : 'pause');
-    }
+    setIsPlaying(prev => !prev);
   };
 
   return (
@@ -480,7 +487,7 @@ export default function App() {
     setInspectorPage(page);
     setLoadingInspector(true);
     try {
-      const res = await axios.get(`http://localhost:8080/process/data?filename=${filename}&page=${page}&limit=5`);
+      const res = await axios.get(`http://127.0.0.1:9002/process/data?filename=${filename}&page=${page}&limit=5`);
       setInspectorData(res.data);
     } catch (e) {
       console.error(e);
