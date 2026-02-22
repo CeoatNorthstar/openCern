@@ -284,6 +284,31 @@ async def get_process_status(filename: str):
     status = process_status.get(filename, "idle")
     return {"status": status}
 
+@app.get("/process/data")
+async def get_process_data(filename: str, page: int = 1, limit: int = 5):
+    import json
+    stem = os.path.splitext(filename)[0]
+    output_file = os.path.expanduser(f"~/opencern-datasets/processed/{stem}.json")
+    if not os.path.exists(output_file):
+        return {"error": "Processed data not found"}
+    
+    with open(output_file, "r") as f:
+        data = json.load(f)
+        
+    events = data.get("events", [])
+    total_events = len(events)
+    start = (page - 1) * limit
+    end = start + limit
+    
+    return {
+        "metadata": data.get("metadata", {}),
+        "events": events[start:end],
+        "total_events": total_events,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total_events + limit - 1) // limit if limit > 0 else 0
+    }
+
 # TODO 10: Run with uvicorn on port 8080
 if __name__ == "__main__":
     import uvicorn

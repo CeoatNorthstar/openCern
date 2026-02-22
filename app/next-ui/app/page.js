@@ -117,6 +117,35 @@ const IconCpu = () => (
   </svg>
 );
 
+const IconChevronDown = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9"></polyline>
+  </svg>
+);
+
+const IconChevronRight = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6"></polyline>
+  </svg>
+);
+
+const IconDatabase = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+  </svg>
+);
+
+const IconSidebarClose = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+    <line x1="15" y1="3" x2="15" y2="21"></line>
+    <line x1="8" y1="9" x2="12" y2="12"></line>
+    <line x1="12" y1="12" x2="8" y2="15"></line>
+  </svg>
+);
+
 const Logo = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -135,6 +164,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
+  
+  // Inspector states
+  const [expandedFiles, setExpandedFiles] = useState({});
+  const [inspectingFile, setInspectingFile] = useState(null);
+  const [inspectorData, setInspectorData] = useState(null);
+  const [inspectorPage, setInspectorPage] = useState(1);
+  const [loadingInspector, setLoadingInspector] = useState(false);
 
   const triggerDownloadAnimation = (e) => {
     if (!e) return;
@@ -234,6 +270,30 @@ export default function App() {
     }
   };
 
+  const toggleExpand = (filename) => {
+    setExpandedFiles(prev => ({ ...prev, [filename]: !prev[filename] }));
+  };
+
+  const openInspector = async (filename, page = 1) => {
+    setInspectingFile(filename);
+    setInspectorPage(page);
+    setLoadingInspector(true);
+    try {
+      const res = await axios.get(`http://localhost:8080/process/data?filename=${filename}&page=${page}&limit=5`);
+      setInspectorData(res.data);
+    } catch (e) {
+      console.error(e);
+      setInspectorData({ error: 'Failed to load data.' });
+    } finally {
+      setLoadingInspector(false);
+    }
+  };
+
+  const closeInspector = () => {
+    setInspectingFile(null);
+    setInspectorData(null);
+  };
+
   useEffect(() => {
     if (activeTab === 'downloaded' && downloaded.length > 0) {
       downloaded.forEach(async (f) => {
@@ -259,6 +319,10 @@ export default function App() {
         body { user-select: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .spin { animation: spin 1s linear infinite; }
+        @keyframes slideIn { 
+          from { transform: translateX(20px); opacity: 0; } 
+          to { transform: translateX(0); opacity: 1; } 
+        }
       `;
       document.head.appendChild(style);
     }
@@ -719,109 +783,234 @@ export default function App() {
 
           {/* Downloaded Tab */}
           {activeTab === 'downloaded' && (
-            <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-              <div style={{ marginBottom: '32px' }}>
-                <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 8px 0' }}>Local Storage</h1>
-                <p style={{ fontSize: '14px', margin: 0, color: '#9ca3af' }}>Manage files currently downloaded to disk.</p>
+            <div style={{ display: 'flex', gap: '24px', height: '100%', width: '100%' }}>
+              <div style={{ flex: 1, maxWidth: inspectingFile ? 'calc(100% - 424px)' : '960px', margin: inspectingFile ? '0' : '0 auto', transition: 'max-width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ marginBottom: '32px', flexShrink: 0 }}>
+                  <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 8px 0' }}>Local Storage</h1>
+                  <p style={{ fontSize: '14px', margin: 0, color: '#9ca3af' }}>Manage files currently downloaded to disk.</p>
+                </div>
+
+                {downloaded.length === 0 ? (
+                  <div style={{ 
+                    color: '#6b7280', fontSize: '13px', textAlign: 'center', padding: '64px 0',
+                    border: '1px dashed #232328', borderRadius: '8px', flexShrink: 0
+                  }}>
+                    No local files found.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', paddingBottom: '32px', paddingRight: '12px' }}>
+                    {downloaded.map(f => {
+                      const pStatus = processing[f.filename] || 'idle';
+                      const isExpanded = expandedFiles[f.filename];
+                      return (
+                      <div key={f.filename} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{
+                          background: '#131317', border: '1px solid #232328', borderRadius: '6px',
+                          padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          transition: 'background 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#18181f'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#131317'}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            {pStatus === 'processed' ? (
+                               <button 
+                                 onClick={() => toggleExpand(f.filename)}
+                                 style={{ background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
+                                 title={isExpanded ? "Collapse" : "Expand Processed Data"}
+                               >
+                                 {isExpanded ? <IconChevronDown /> : <IconChevronRight />}
+                               </button>
+                             ) : (
+                               <div style={{ width: '14px' }}></div>
+                             )}
+                            <div style={{ color: '#6b7280' }}><IconFile /></div>
+                            <div style={{ fontFamily: 'var(--font-geist-mono), monospace', fontSize: '13px', color: '#d1d5db' }}>
+                              {f.filename}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+                            <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: 'var(--font-geist-mono), monospace' }}>
+                              {formatSize(f.size)}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <button
+                                onClick={() => (pStatus === 'idle' || pStatus === 'error') ? processFile(f.filename) : null}
+                                disabled={pStatus === 'processing' || pStatus === 'processed'}
+                                style={{ 
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                                  background: pStatus === 'processed' ? '#059669' : 
+                                              pStatus === 'error' ? '#dc2626' : 
+                                              pStatus === 'processing' ? '#3b82f6' : 'transparent',
+                                  border: `1px solid ${pStatus === 'idle' ? '#374151' : 'transparent'}`,
+                                  color: pStatus === 'idle' ? '#d1d5db' : '#ffffff', 
+                                  padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
+                                  cursor: (pStatus === 'processing' || pStatus === 'processed') ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  opacity: pStatus === 'processing' ? 0.8 : 1
+                                }}
+                              >
+                                {pStatus === 'processing' ? (
+                                  <>
+                                    <svg className="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                       <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                                       <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff"></path>
+                                    </svg>
+                                    PROCESSING
+                                  </>
+                                ) : pStatus === 'processed' ? (
+                                  <>
+                                    <IconCheck /> PROCESSED
+                                  </>
+                                ) : pStatus === 'error' ? (
+                                  <>
+                                    <IconX /> RETRY
+                                  </>
+                                ) : (
+                                  <>
+                                    <IconCpu /> PROCESS
+                                  </>
+                                )}
+                              </button>
+                              
+                              <div style={{ width: '1px', height: '16px', background: '#374151', margin: '0 4px' }} />
+
+                              <button onClick={() => revealFile(f.filename)} style={{ 
+                                background: 'transparent', border: '1px solid #374151', color: '#d1d5db', 
+                                padding: '4px 12px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#232328'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                Reveal in Finder
+                              </button>
+                              <button onClick={() => deleteFile(f.filename)} style={{ 
+                                background: 'transparent', border: '1px solid #7f1d1d', color: '#ef4444', 
+                                padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.15s ease'
+                              }} title="Delete File"
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#450a0a'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <IconTrash />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Processed Data Sub-folder */}
+                        {isExpanded && pStatus === 'processed' && (
+                          <div style={{
+                            marginLeft: '44px', background: '#18181f', border: '1px solid #232328', borderRadius: '6px',
+                            padding: '12px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            cursor: 'pointer', transition: 'background 0.15s ease',
+                            borderLeft: '2px solid #3b82f6',
+                            animation: 'slideIn 0.2s ease-out'
+                          }}
+                          onClick={() => openInspector(f.filename, 1)}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#1e1e24'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = '#18181f'}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div style={{ color: '#3b82f6' }}><IconDatabase /></div>
+                              <div style={{ fontFamily: 'var(--font-geist-mono), monospace', fontSize: '13px', color: '#d1d5db' }}>
+                                {f.filename.replace('.root', '.json')}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 8px', borderRadius: '4px', fontWeight: 600, letterSpacing: '0.5px' }}>
+                              PROCESSED DATA
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )})}
+                  </div>
+                )}
               </div>
 
-              {downloaded.length === 0 ? (
+              {/* Inspector Sidebar */}
+              {inspectingFile && (
                 <div style={{ 
-                  color: '#6b7280', fontSize: '13px', textAlign: 'center', padding: '64px 0',
-                  border: '1px dashed #232328', borderRadius: '8px' 
+                  width: '400px', flexShrink: 0, background: '#131317', border: '1px solid #232328', borderRadius: '8px', 
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%',
+                  animation: 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}>
-                  No local files found.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {downloaded.map(f => {
-                    const pStatus = processing[f.filename] || 'idle';
-                    return (
-                    <div key={f.filename} style={{
-                      background: '#131317', border: '1px solid #232328', borderRadius: '6px',
-                      padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      transition: 'background 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#18181f'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#131317'}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ color: '#6b7280' }}><IconFile /></div>
-                        <div style={{ fontFamily: 'var(--font-geist-mono), monospace', fontSize: '13px', color: '#d1d5db' }}>
-                          {f.filename}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                        <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: 'var(--font-geist-mono), monospace' }}>
-                          {formatSize(f.size)}
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <button
-                            onClick={() => (pStatus === 'idle' || pStatus === 'error') ? processFile(f.filename) : null}
-                            disabled={pStatus === 'processing' || pStatus === 'processed'}
-                            style={{ 
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                              background: pStatus === 'processed' ? '#059669' : 
-                                          pStatus === 'error' ? '#dc2626' : 
-                                          pStatus === 'processing' ? '#3b82f6' : 'transparent',
-                              border: `1px solid ${pStatus === 'idle' ? '#374151' : 'transparent'}`,
-                              color: pStatus === 'idle' ? '#d1d5db' : '#ffffff', 
-                              padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                              cursor: (pStatus === 'processing' || pStatus === 'processed') ? 'not-allowed' : 'pointer',
-                              transition: 'all 0.15s ease',
-                              opacity: pStatus === 'processing' ? 0.8 : 1
-                            }}
-                          >
-                            {pStatus === 'processing' ? (
-                              <>
-                                <svg className="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
-                                   <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff"></path>
-                                </svg>
-                                PROCESSING
-                              </>
-                            ) : pStatus === 'processed' ? (
-                              <>
-                                <IconCheck /> PROCESSED
-                              </>
-                            ) : pStatus === 'error' ? (
-                              <>
-                                <IconX /> RETRY
-                              </>
-                            ) : (
-                              <>
-                                <IconCpu /> PROCESS
-                              </>
-                            )}
-                          </button>
-                          
-                          <div style={{ width: '1px', height: '16px', background: '#374151', margin: '0 4px' }} />
-
-                          <button onClick={() => revealFile(f.filename)} style={{ 
-                            background: 'transparent', border: '1px solid #374151', color: '#d1d5db', 
-                            padding: '4px 12px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#232328'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            Reveal in Finder
-                          </button>
-                          <button onClick={() => deleteFile(f.filename)} style={{ 
-                            background: 'transparent', border: '1px solid #7f1d1d', color: '#ef4444', 
-                            padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            transition: 'all 0.15s ease'
-                          }} title="Delete File"
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#450a0a'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <IconTrash />
-                          </button>
-                        </div>
+                  {/* Header */}
+                  <div style={{ padding: '16px 20px', borderBottom: '1px solid #232328', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#18181f' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ color: '#3b82f6' }}><IconDatabase /></div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#f3f4f6', fontFamily: 'var(--font-geist-mono), monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+                        {inspectingFile.replace('.root', '.json')}
                       </div>
                     </div>
-                  )})}
+                    <button onClick={closeInspector} style={{ background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', borderRadius: '4px', transition: 'all 0.15s' }} onMouseEnter={(e) => e.currentTarget.style.background = '#232328'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'} title="Close Inspector">
+                      <IconSidebarClose />
+                    </button>
+                  </div>
+                  
+                  {/* Content */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '20px', background: '#0e0e11' }}>
+                    {loadingInspector ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#6b7280', gap: '8px', fontSize: '12px' }}>
+                         <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6"></path></svg>
+                         Loading Data...
+                      </div>
+                    ) : inspectorData?.error ? (
+                      <div style={{ color: '#ef4444', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>
+                        {inspectorData.error}
+                      </div>
+                    ) : inspectorData ? (
+                      <div>
+                        {/* Meta Info */}
+                        <div style={{ marginBottom: '20px', padding: '12px', background: '#131317', border: '1px solid #232328', borderRadius: '6px' }}>
+                          <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px', fontWeight: 600, letterSpacing: '0.5px' }}>METADATA</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                             <span style={{ color: '#6b7280' }}>Total Events:</span>
+                             <span style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{inspectorData.metadata?.filtered_events || inspectorData.total_events}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                             <span style={{ color: '#6b7280' }}>Avg Particles:</span>
+                             <span style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{inspectorData.metadata?.avg_particles_per_event}</span>
+                          </div>
+                        </div>
+
+                        {/* JSON Data Render */}
+                        <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px', fontWeight: 600, letterSpacing: '0.5px' }}>DATA CHUNK (PAGE {inspectorData.page}/{inspectorData.total_pages})</div>
+                        <pre style={{ 
+                          background: '#131317', border: '1px solid #232328', borderRadius: '6px', padding: '16px', 
+                          overflowX: 'auto', fontSize: '10.5px', color: '#a7c080', fontFamily: 'var(--font-geist-mono), monospace',
+                          margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', lineHeight: '1.5'
+                        }}>
+                          {JSON.stringify(inspectorData.events, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* Pagination Footer */}
+                  {inspectorData && !loadingInspector && !inspectorData.error && inspectorData.total_pages > 0 && (
+                    <div style={{ padding: '12px 20px', borderTop: '1px solid #232328', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#18181f' }}>
+                       <button 
+                         disabled={inspectorData.page <= 1}
+                         onClick={() => openInspector(inspectingFile, inspectorData.page - 1)}
+                         style={{ background: '#232328', border: '1px solid #374151', color: inspectorData.page <= 1 ? '#6b7280' : '#d1d5db', padding: '6px 12px', borderRadius: '4px', fontSize: '11px', cursor: inspectorData.page <= 1 ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                       >
+                         Previous
+                       </button>
+                       <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                         Page <span style={{ color: '#f3f4f6', fontWeight: 600 }}>{inspectorData.page}</span> of {inspectorData.total_pages}
+                       </div>
+                       <button 
+                         disabled={inspectorData.page >= inspectorData.total_pages}
+                         onClick={() => openInspector(inspectingFile, inspectorData.page + 1)}
+                         style={{ background: '#232328', border: '1px solid #374151', color: inspectorData.page >= inspectorData.total_pages ? '#6b7280' : '#d1d5db', padding: '6px 12px', borderRadius: '4px', fontSize: '11px', cursor: inspectorData.page >= inspectorData.total_pages ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                       >
+                         Next
+                       </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
