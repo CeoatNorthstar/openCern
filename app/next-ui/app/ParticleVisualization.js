@@ -238,10 +238,15 @@ export default function ParticleVisualization({ filename }) {
       radius: 220,
       extruded: true,
       getElevation: 700,
-      getFillColor: [40, 80, 120, 35], // Clouded see-through blue solid
+      getFillColor: [40, 80, 120, 25], // Thinned down Clouded see-through blue solid
       elevationScale: 1,
       modelMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -350, 1],
-      parameters: { depthTest: true, depthWrite: false }
+      parameters: { 
+        depthTest: true, 
+        depthWrite: false,
+        blend: true,
+        blendFunc: ['SRC_ALPHA', 'ONE_MINUS_SRC_ALPHA', 'ONE', 'ONE_MINUS_SRC_ALPHA']
+      }
     }));
 
     // 1. Static Detector (Concentric Wireframes)
