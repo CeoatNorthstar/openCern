@@ -102,6 +102,21 @@ const IconInfo = () => (
   </svg>
 );
 
+const IconCpu = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+    <rect x="9" y="9" width="6" height="6"></rect>
+    <line x1="9" y1="1" x2="9" y2="4"></line>
+    <line x1="15" y1="1" x2="15" y2="4"></line>
+    <line x1="9" y1="20" x2="9" y2="23"></line>
+    <line x1="15" y1="20" x2="15" y2="23"></line>
+    <line x1="20" y1="9" x2="23" y2="9"></line>
+    <line x1="20" y1="14" x2="23" y2="14"></line>
+    <line x1="1" y1="9" x2="4" y2="9"></line>
+    <line x1="1" y1="14" x2="4" y2="14"></line>
+  </svg>
+);
+
 const Logo = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -116,6 +131,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [downloaded, setDownloaded] = useState([]);
   const [downloading, setDownloading] = useState({});
+  const [processing, setProcessing] = useState({});
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
@@ -194,6 +210,41 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const processFile = async (filename) => {
+    setProcessing(prev => ({ ...prev, [filename]: 'processing' }));
+    try {
+      await axios.post(`http://localhost:8080/process?filename=${filename}`);
+      
+      const interval = setInterval(async () => {
+        try {
+          const res = await axios.get(`http://localhost:8080/process/status?filename=${filename}`);
+          const status = res.data.status;
+          setProcessing(prev => ({ ...prev, [filename]: status }));
+          if (status === 'processed' || status === 'error') {
+            clearInterval(interval);
+          }
+        } catch (e) {
+          clearInterval(interval);
+          setProcessing(prev => ({ ...prev, [filename]: 'error' }));
+        }
+      }, 1000);
+    } catch (e) { 
+      setProcessing(prev => ({ ...prev, [filename]: 'error' }));
+      console.error(e); 
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'downloaded' && downloaded.length > 0) {
+      downloaded.forEach(async (f) => {
+        try {
+          const res = await axios.get(`http://localhost:8080/process/status?filename=${f.filename}`);
+          setProcessing(prev => ({ ...prev, [f.filename]: res.data.status }));
+        } catch (e) {}
+      });
+    }
+  }, [activeTab, downloaded]);
+
   useEffect(() => {
     // Add custom LM Studio-like scrollbar styles globally (only once)
     let style = document.getElementById('lm-studio-styles');
@@ -206,6 +257,8 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #555; }
         body { user-select: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
       `;
       document.head.appendChild(style);
     }
@@ -681,7 +734,9 @@ export default function App() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {downloaded.map(f => (
+                  {downloaded.map(f => {
+                    const pStatus = processing[f.filename] || 'idle';
+                    return (
                     <div key={f.filename} style={{
                       background: '#131317', border: '1px solid #232328', borderRadius: '6px',
                       padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -700,7 +755,48 @@ export default function App() {
                         <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: 'var(--font-geist-mono), monospace' }}>
                           {formatSize(f.size)}
                         </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            onClick={() => (pStatus === 'idle' || pStatus === 'error') ? processFile(f.filename) : null}
+                            disabled={pStatus === 'processing' || pStatus === 'processed'}
+                            style={{ 
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                              background: pStatus === 'processed' ? '#059669' : 
+                                          pStatus === 'error' ? '#dc2626' : 
+                                          pStatus === 'processing' ? '#3b82f6' : 'transparent',
+                              border: `1px solid ${pStatus === 'idle' ? '#374151' : 'transparent'}`,
+                              color: pStatus === 'idle' ? '#d1d5db' : '#ffffff', 
+                              padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
+                              cursor: (pStatus === 'processing' || pStatus === 'processed') ? 'not-allowed' : 'pointer',
+                              transition: 'all 0.15s ease',
+                              opacity: pStatus === 'processing' ? 0.8 : 1
+                            }}
+                          >
+                            {pStatus === 'processing' ? (
+                              <>
+                                <svg className="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                                   <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff"></path>
+                                </svg>
+                                PROCESSING
+                              </>
+                            ) : pStatus === 'processed' ? (
+                              <>
+                                <IconCheck /> PROCESSED
+                              </>
+                            ) : pStatus === 'error' ? (
+                              <>
+                                <IconX /> RETRY
+                              </>
+                            ) : (
+                              <>
+                                <IconCpu /> PROCESS
+                              </>
+                            )}
+                          </button>
+                          
+                          <div style={{ width: '1px', height: '16px', background: '#374151', margin: '0 4px' }} />
+
                           <button onClick={() => revealFile(f.filename)} style={{ 
                             background: 'transparent', border: '1px solid #374151', color: '#d1d5db', 
                             padding: '4px 12px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
@@ -725,7 +821,7 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>

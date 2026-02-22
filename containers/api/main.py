@@ -246,6 +246,44 @@ async def reveal_file(filename: str):
     else:
         return {"error": "File not found"}
 
+
+process_status = {}
+
+@app.post("/process")
+async def process_file(filename: str, background_tasks: BackgroundTasks):
+    filepath = os.path.expanduser(f"~/opencern-datasets/data/{filename}")
+    if not os.path.exists(filepath):
+        return {"error": "File not found"}
+    
+    output_dir = os.path.expanduser("~/opencern-datasets/processed/")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    process_status[filename] = "processing"
+    background_tasks.add_task(run_processor, filepath, filename)
+    return {"message": "Processing started", "status": "processing"}
+
+def run_processor(filepath: str, filename: str):
+    import subprocess
+    result = subprocess.run([
+        "python",
+        os.path.expanduser("~/opencern/containers/data-processor/main.py"),
+        filepath
+    ])
+    if result.returncode == 0:
+        process_status[filename] = "processed"
+    else:
+        process_status[filename] = "error"
+
+@app.get("/process/status")
+async def get_process_status(filename: str):
+    stem = os.path.splitext(filename)[0]
+    output_file = os.path.expanduser(f"~/opencern-datasets/processed/{stem}.json")
+    if os.path.exists(output_file):
+        return {"status": "processed"}
+    
+    status = process_status.get(filename, "idle")
+    return {"status": status}
+
 # TODO 10: Run with uvicorn on port 8080
 if __name__ == "__main__":
     import uvicorn
