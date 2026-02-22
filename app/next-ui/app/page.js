@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OrbitControls } from 'three-stdlib';
 
 const formatSize = (bytes) => {
   if (!bytes) return 'Unknown';
@@ -309,10 +309,12 @@ const ParticleVisualization = () => {
       const child = group.children[0];
       group.remove(child);
       if (child.geometry) child.geometry.dispose();
-      if (Array.isArray(child.material)) {
-         child.material.forEach(m => m.dispose());
-      } else if (child.material) {
-         child.material.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+           child.material.forEach(m => m.dispose());
+        } else {
+           child.material.dispose();
+        }
       }
     }
 
@@ -331,19 +333,19 @@ const ParticleVisualization = () => {
       photon: 0xffffff
     };
 
-    // Add new particles
+      // Add new particles
     data.particles.forEach(p => {
       const vec = new THREE.Vector3(p.px, p.py, p.pz);
       const pt = Math.sqrt(p.px*p.px + p.py*p.py);
-      const energy_scale = Math.min(pt * 2.0, 100); // Scale logic for visual distance
+      const energy_scale = Math.min(pt * 2.0, 100); 
       const dir = vec.clone().normalize();
       
       let colorNum = typeColors[p.type] || 0xffffff;
       
-      let drawLength = 100; // Base
-      if (p.type === 'muon') drawLength = 220 + energy_scale; // penetrate detector (R=200)
-      else if (p.type === 'electron' || p.type === 'photon') drawLength = 130 + energy_scale * 0.5; // stop at ECAL
-      else if (p.type === 'jet') drawLength = 80 + energy_scale; // short, wide
+      let drawLength = 100;
+      if (p.type === 'muon') drawLength = 220 + energy_scale;
+      else if (p.type === 'electron' || p.type === 'photon') drawLength = 130 + energy_scale * 0.5;
+      else if (p.type === 'jet') drawLength = 80 + energy_scale;
       else if (p.type === 'tau') drawLength = 150 + energy_scale * 0.7;
 
       const endPoint = dir.multiplyScalar(drawLength);
@@ -356,12 +358,10 @@ const ParticleVisualization = () => {
         const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0.8 });
         const mesh = new THREE.Mesh(coneGeom, coneMat);
         mesh.lookAt(endPoint);
-        // Start infinitesimally small for shoot outward animation
         mesh.scale.set(0.01, 0.01, 0.01);
         group.add(mesh);
       } else {
-        const points = [new THREE.Vector3(0,0,0), endPoint];
-        const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+        const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), endPoint.clone()]);
         const lineMat = new THREE.LineBasicMaterial({ color: colorNum, transparent: true, opacity: 0.9, linewidth: p.type==='muon'? 2 : 1 });
         const line = new THREE.Line(lineGeom, lineMat);
         line.scale.set(0.01, 0.01, 0.01);
