@@ -614,16 +614,8 @@ export default function App() {
           justifyContent: 'flex-end', /* Pushing content to right, title implied by nav */
         }}>
           <div style={{ display: 'flex', gap: '12px' }}>
-            <div style={{ 
-              fontSize: '11px', 
-              color: '#6b7280', 
-              background: '#131317', 
-              padding: '4px 10px', 
-              borderRadius: '4px', 
-              border: '1px solid #232328',
-              fontWeight: 500
-            }}>
-              v0.1.1 (Apple Silicon)
+            <div style={{ fontSize: '11px', color: '#6b7280', background: '#131317', padding: '4px 10px', borderRadius: '4px', border: '1px solid #232328', fontWeight: 500 }}>
+              v0.1.3 — base pipeline complete
             </div>
           </div>
         </div>
@@ -1055,7 +1047,7 @@ export default function App() {
               </div>
               <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 16px 0' }}>OpenCERN Local Explorer</h1>
               <div style={{ fontSize: '14px', fontWeight: 500, color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)', display: 'inline-block', padding: '4px 12px', borderRadius: '999px', marginBottom: '32px' }}>
-                Version 0.1.1
+                Version 0.1.3 — base pipeline complete
               </div>
               <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: 1.6, margin: '0 0 32px 0' }}>
                 OpenCERN provides researchers and enthusiasts with streamlined, native access to high-energy physics datasets from the CERN Open Data Portal. Developed for efficiency, built for the future.
