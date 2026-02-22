@@ -161,6 +161,7 @@ const ParticleVisualization = () => {
   const wsRef = useRef(null);
   const sceneRef = useRef(null);
   const particlesGroupRef = useRef(null);
+  const flashRef = useRef(null);
   
   const [stats, setStats] = useState(null);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -168,35 +169,58 @@ const ParticleVisualization = () => {
   useEffect(() => {
     if (!mountRef.current) return;
     
-    // Scene setup
     const scene = new THREE.Scene();
     sceneRef.current = scene;
     
-    // Camera
     const camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 100000);
-    camera.position.set(0, 50, 100);
+    // Position camera to see the cylinder nicely
+    camera.position.set(250, 200, 350);
     
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     mountRef.current.appendChild(renderer.domElement);
     
-    // Orbit Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.5;
     
-    // Detector Cylinder (CMS style wireframe)
-    const geometry = new THREE.CylinderGeometry(20, 20, 40, 32, 1, true);
-    const material = new THREE.MeshBasicMaterial({ color: 0x3b82f6, wireframe: true, transparent: true, opacity: 0.15 });
-    const cylinder = new THREE.Mesh(geometry, material);
-    scene.add(cylinder);
+    // CMS Detector Wireframe
+    const detColor = 0x1e2d45;
+    // Barrel (Z is beamline, so orient cylinder along Z axis)
+    const barrelGeom = new THREE.CylinderGeometry(200, 200, 600, 32, 1, true);
+    barrelGeom.rotateX(Math.PI / 2);
+    const barrelMat = new THREE.MeshBasicMaterial({ color: detColor, wireframe: true, transparent: true, opacity: 0.3 });
+    const barrel = new THREE.Mesh(barrelGeom, barrelMat);
+    scene.add(barrel);
 
-    // Grid Helper
-    const gridHelper = new THREE.GridHelper(100, 20, 0x232328, 0x131317);
-    scene.add(gridHelper);
+    // Endcaps
+    const endcapGeom = new THREE.CircleGeometry(200, 32);
+    const endcapMat = new THREE.MeshBasicMaterial({ color: detColor, wireframe: true, transparent: true, opacity: 0.3 });
+    const endcap1 = new THREE.Mesh(endcapGeom, endcapMat);
+    endcap1.position.z = 300;
+    scene.add(endcap1);
     
+    const endcap2 = new THREE.Mesh(endcapGeom, endcapMat);
+    endcap2.position.z = -300;
+    endcap2.rotation.y = Math.PI;
+    scene.add(endcap2);
+
+    // Central collision sphere
+    const centerGeom = new THREE.SphereGeometry(2, 16, 16);
+    const centerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+    const centerSphere = new THREE.Mesh(centerGeom, centerMat);
+    scene.add(centerSphere);
+
+    // Flash animation mesh
+    const flashGeom = new THREE.SphereGeometry(1, 32, 32);
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+    const flashMesh = new THREE.Mesh(flashGeom, flashMat);
+    scene.add(flashMesh);
+    flashRef.current = flashMesh;
+
     const particlesGroup = new THREE.Group();
     scene.add(particlesGroup);
     particlesGroupRef.current = particlesGroup;
@@ -207,13 +231,22 @@ const ParticleVisualization = () => {
       controls.update();
       renderer.render(scene, camera);
       
-      // Fade in particles
+      // Flash animation logic
+      if (flashRef.current && flashRef.current.material.opacity > 0) {
+        flashRef.current.scale.addScalar(0.8);
+        flashRef.current.material.opacity -= 0.05;
+      }
+
+      // Shoot particles outward (scale from 0 to 1)
       if (particlesGroupRef.current) {
         particlesGroupRef.current.children.forEach(child => {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(m => { if (m.opacity < 1) m.opacity += 0.05; });
-          } else if (child.material && child.material.opacity < 1) {
-            child.material.opacity += 0.05;
+          if (child.scale.x < 1.0) {
+            const inc = 0.05;
+            child.scale.set(
+              Math.min(1.0, child.scale.x + inc),
+              Math.min(1.0, child.scale.y + inc),
+              Math.min(1.0, child.scale.z + inc)
+            );
           }
         });
       }
@@ -231,9 +264,7 @@ const ParticleVisualization = () => {
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
-      if (mountRef.current) {
-        mountRef.current.removeChild(renderer.domElement);
-      }
+      if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
       renderer.dispose();
       scene.clear();
     };
@@ -242,23 +273,18 @@ const ParticleVisualization = () => {
   useEffect(() => {
     let ws = new WebSocket('ws://127.0.0.1:9001');
     wsRef.current = ws;
-    
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         renderEvent(data);
       } catch(e) { console.error(e); }
     };
-    
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
+      if (ws.readyState === WebSocket.OPEN) ws.close();
     };
   }, []);
 
   useEffect(() => {
-    // Send play/pause depending on isPlaying state
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(isPlaying ? 'play' : 'pause');
     }
@@ -290,74 +316,131 @@ const ParticleVisualization = () => {
       }
     }
 
+    // Trigger flash animation
+    if (flashRef.current) {
+      flashRef.current.scale.set(1, 1, 1);
+      flashRef.current.material.opacity = 1.0;
+    }
+
+    // Colors mapping
+    const typeColors = {
+      muon: 0xff6b6b,
+      electron: 0x7fbbb3,
+      jet: 0xdbbc7f,
+      tau: 0xd699b6,
+      photon: 0xffffff
+    };
+
     // Add new particles
     data.particles.forEach(p => {
-      // px, py, pz are momentum vectors, scale them for visual length
-      const vec = new THREE.Vector3(p.px, p.py, p.pz).multiplyScalar(2.0);
-      const length = vec.length();
+      const vec = new THREE.Vector3(p.px, p.py, p.pz);
+      const pt = Math.sqrt(p.px*p.px + p.py*p.py);
+      const energy_scale = Math.min(pt * 2.0, 100); // Scale logic for visual distance
       const dir = vec.clone().normalize();
       
-      let colorNum = parseInt(p.color.replace('#', '0x'), 16);
+      let colorNum = typeColors[p.type] || 0xffffff;
+      
+      let drawLength = 100; // Base
+      if (p.type === 'muon') drawLength = 220 + energy_scale; // penetrate detector (R=200)
+      else if (p.type === 'electron' || p.type === 'photon') drawLength = 130 + energy_scale * 0.5; // stop at ECAL
+      else if (p.type === 'jet') drawLength = 80 + energy_scale; // short, wide
+      else if (p.type === 'tau') drawLength = 150 + energy_scale * 0.7;
+
+      const endPoint = dir.multiplyScalar(drawLength);
       
       if (p.type === 'jet') {
-        const coneGeom = new THREE.ConeGeometry(0.5, Math.min(length, 40), 8);
-        coneGeom.translate(0, Math.min(length, 40)/2, 0);
+        const coneGeom = new THREE.ConeGeometry(drawLength * 0.15, drawLength, 12);
+        coneGeom.translate(0, drawLength/2, 0);
         coneGeom.rotateX(Math.PI / 2);
         
-        const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0 });
+        const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0.8 });
         const mesh = new THREE.Mesh(coneGeom, coneMat);
-        
-        // Orient the cone along the momentum vector
-        const target = vec.clone().add(new THREE.Vector3(0,0,0));
-        mesh.lookAt(target);
+        mesh.lookAt(endPoint);
+        // Start infinitesimally small for shoot outward animation
+        mesh.scale.set(0.01, 0.01, 0.01);
         group.add(mesh);
       } else {
-        const points = [new THREE.Vector3(0,0,0), vec];
+        const points = [new THREE.Vector3(0,0,0), endPoint];
         const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
-        const lineMat = new THREE.LineBasicMaterial({ color: colorNum, transparent: true, opacity: 0, linewidth: 2 });
+        const lineMat = new THREE.LineBasicMaterial({ color: colorNum, transparent: true, opacity: 0.9, linewidth: p.type==='muon'? 2 : 1 });
         const line = new THREE.Line(lineGeom, lineMat);
+        line.scale.set(0.01, 0.01, 0.01);
         group.add(line);
       }
     });
+
+    // Draw MET
+    if (data.met_vector) {
+      const { pt, phi } = data.met_vector;
+      const met_px = pt * Math.cos(phi);
+      const met_py = pt * Math.sin(phi);
+      const metDir = new THREE.Vector3(met_px, met_py, 0).normalize();
+      // Arrow properties
+      const arrowLength = 150;
+      const hex = 0xff6b35;
+      const arrowHelper = new THREE.ArrowHelper(metDir, new THREE.Vector3(0,0,0), arrowLength, hex, 20, 10);
+      
+      // Make line dashed
+      if (arrowHelper.line) {
+        const dashedMat = new THREE.LineDashedMaterial({ color: hex, dashSize: 5, gapSize: 5 });
+        arrowHelper.line.material = dashedMat;
+        arrowHelper.line.computeLineDistances();
+      }
+      arrowHelper.scale.set(0.01, 0.01, 0.01);
+      group.add(arrowHelper);
+    }
   };
 
-  const togglePlay = () => {
-    setIsPlaying(prev => !prev);
+  const togglePlay = () => setIsPlaying(prev => !prev);
+
+  // Stats color dots
+  const typeDots = {
+    muon: '#ff6b6b',
+    electron: '#7fbbb3',
+    jet: '#dbbc7f',
+    tau: '#d699b6',
+    photon: '#ffffff'
   };
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#080b14', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1f2937' }}>
-      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+      <div ref={mountRef} style={{ width: '100%', height: '100%', cursor: 'grab' }} onMouseDown={e => e.currentTarget.style.cursor='grabbing'} onMouseUp={e => e.currentTarget.style.cursor='grab'} />
       
-      {/* Stats Overlay */}
-      <div style={{ position: 'absolute', top: '24px', left: '24px', background: 'rgba(19, 19, 23, 0.8)', backdropFilter: 'blur(8px)', border: '1px solid #232328', borderRadius: '8px', padding: '16px', minWidth: '240px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 12px 0', fontFamily: 'var(--font-geist-mono), monospace' }}>
-          EVENT {stats ? stats.index : '---'} <span style={{ color: '#6b7280', fontSize: '11px' }}>/ 5000</span>
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px', fontSize: '12px' }}>
-          <div>
-            <div style={{ color: '#9ca3af', marginBottom: '2px' }}>HT</div>
-            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{stats ? stats.ht.toFixed(1) : '---'}</div>
+      {/* HUD Overlay - Bottom Left */}
+      <div style={{ position: 'absolute', bottom: '24px', left: '24px', background: 'rgba(19, 19, 23, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid #232328', borderRadius: '8px', padding: '16px', minWidth: '240px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', zIndex: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#f3f4f6', margin: 0, letterSpacing: '0.5px' }}>
+            EVENT {stats ? stats.index : '---'} <span style={{ color: '#6b7280', fontSize: '11px', fontWeight: 400 }}>/ 5000</span>
+          </h3>
+          {/* Play/Pause inside HUD */}
+          <button onClick={togglePlay} style={{ background: isPlaying ? 'rgba(59,130,246,0.1)' : '#3b82f6', color: isPlaying ? '#3b82f6' : '#fff', border: isPlaying ? '1px solid rgba(59,130,246,0.3)' : 'border:none', borderRadius: '4px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}>
+            {isPlaying ? <IconPause /> : <IconPlay />}
+          </button>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px', fontSize: '12px' }}>
+          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px', borderRadius: '6px' }}>
+            <div style={{ color: '#9ca3af', marginBottom: '4px', fontSize: '10px', letterSpacing: '0.5px' }}>HT (GeV)</div>
+            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{stats ? stats.ht.toFixed(1) : '---'}</div>
           </div>
-          <div>
-            <div style={{ color: '#9ca3af', marginBottom: '2px' }}>MET</div>
-            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{stats ? stats.met.toFixed(1) : '---'}</div>
+          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px', borderRadius: '6px' }}>
+            <div style={{ color: '#ff6b35', marginBottom: '4px', fontSize: '10px', letterSpacing: '0.5px' }}>MET (GeV)</div>
+            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{stats ? stats.met.toFixed(1) : '---'}</div>
           </div>
         </div>
-        <div style={{ borderTop: '1px solid #232328', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+        
+        <div style={{ borderTop: '1px solid #232328', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
           {stats ? Object.entries(stats.counts).map(([type, count]) => (
-            <div key={type} style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#9ca3af', textTransform: 'capitalize' }}>{type}s</span>
-              <span style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{count}</span>
+            <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: typeDots[type] || '#fff' }} />
+                <span style={{ color: '#9ca3af', textTransform: 'capitalize' }}>{type}s</span>
+              </div>
+              <span style={{ color: '#f3f4f6', fontFamily: 'var(--font-geist-mono), monospace', fontWeight: 500 }}>{count}</span>
             </div>
-          )) : <div style={{ color: '#6b7280' }}>Waiting for data stream...</div>}
+          )) : <div style={{ color: '#6b7280', fontStyle: 'italic', fontSize: '11px' }}>Waiting for collision data...</div>}
         </div>
       </div>
-
-      {/* Controls Overlay */}
-      <button onClick={togglePlay} style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '999px', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)', transition: 'all 0.2s', zIndex: 10 }}>
-        {isPlaying ? <IconPause /> : <IconPlay />}
-      </button>
     </div>
   );
 };
