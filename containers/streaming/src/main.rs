@@ -1,9 +1,10 @@
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::fs;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
@@ -17,13 +18,21 @@ async fn main() {
                 .await
                 .expect("WebSocket handshake failed");
 
-            let (mut sender, _receiver) = futures_util::StreamExt::split(ws_stream);
+            let (mut sender, mut receiver) = ws_stream.split();
+            let (tx, mut rx) = mpsc::channel::<String>(32);
+
+            tokio::spawn(async move {
+                while let Some(Ok(msg)) = receiver.next().await {
+                    if let Message::Text(text) = msg {
+                        let _ = tx.send(text.to_string()).await;
+                    }
+                }
+            });
 
             // Read processed JSON file
             let home = std::env::var("HOME").unwrap();
             let processed_dir = format!("{}/opencern-datasets/processed/", home);
 
-            // Find first JSON file
             let entries = fs::read_dir(&processed_dir).expect("Cannot read processed dir");
             let mut json_file: Option<String> = None;
 
@@ -43,12 +52,25 @@ async fn main() {
 
                 if let Some(events) = data["events"].as_array() {
                     println!("Streaming {} events", events.len());
-                    for event in events {
-                        let msg = serde_json::to_string(event).unwrap();
-                        if sender.send(Message::Text(msg.into())).await.is_err() {
-                            break;
+                    let mut is_playing = true;
+                    let mut event_idx = 0;
+
+                    while event_idx < events.len() {
+                        while let Ok(cmd) = rx.try_recv() {
+                            if cmd == "pause" {
+                                is_playing = false;
+                            } else if cmd == "play" {
+                                is_playing = true;
+                            }
                         }
-                        // Stream one event every 100ms
+
+                        if is_playing {
+                            let msg = serde_json::to_string(&events[event_idx]).unwrap();
+                            if sender.send(Message::Text(msg.into())).await.is_err() {
+                                break;
+                            }
+                            event_idx += 1;
+                        }
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
                 }

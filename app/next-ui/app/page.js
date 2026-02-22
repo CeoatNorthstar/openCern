@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const formatSize = (bytes) => {
   if (!bytes) return 'Unknown';
@@ -153,6 +155,205 @@ const Logo = () => (
     <polyline points="2 12 12 17 22 12"></polyline>
   </svg>
 );
+
+const ParticleVisualization = () => {
+  const mountRef = useRef(null);
+  const wsRef = useRef(null);
+  const sceneRef = useRef(null);
+  const particlesGroupRef = useRef(null);
+  
+  const [stats, setStats] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!mountRef.current) return;
+    
+    // Scene setup
+    const scene = new THREE.Scene();
+    sceneRef.current = scene;
+    
+    // Camera
+    const camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 100000);
+    camera.position.set(0, 50, 100);
+    
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    mountRef.current.appendChild(renderer.domElement);
+    
+    // Orbit Controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    
+    // Detector Cylinder (CMS style wireframe)
+    const geometry = new THREE.CylinderGeometry(20, 20, 40, 32, 1, true);
+    const material = new THREE.MeshBasicMaterial({ color: 0x3b82f6, wireframe: true, transparent: true, opacity: 0.15 });
+    const cylinder = new THREE.Mesh(geometry, material);
+    scene.add(cylinder);
+
+    // Grid Helper
+    const gridHelper = new THREE.GridHelper(100, 20, 0x232328, 0x131317);
+    scene.add(gridHelper);
+    
+    const particlesGroup = new THREE.Group();
+    scene.add(particlesGroup);
+    particlesGroupRef.current = particlesGroup;
+
+    let animationFrameId;
+    const animate = () => {
+      animationFrameId = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+      
+      // Fade in particles
+      if (particlesGroupRef.current) {
+        particlesGroupRef.current.children.forEach(child => {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => { if (m.opacity < 1) m.opacity += 0.05; });
+          } else if (child.material && child.material.opacity < 1) {
+            child.material.opacity += 0.05;
+          }
+        });
+      }
+    };
+    animate();
+
+    const handleResize = () => {
+      if (!mountRef.current) return;
+      camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationFrameId);
+      if (mountRef.current) {
+        mountRef.current.removeChild(renderer.domElement);
+      }
+      renderer.dispose();
+      scene.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    let ws = new WebSocket('ws://127.0.0.1:9001');
+    wsRef.current = ws;
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        renderEvent(data);
+      } catch(e) { console.error(e); }
+    };
+    
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, []);
+
+  const renderEvent = (data) => {
+    setStats({
+      index: data.index,
+      ht: data.ht,
+      met: data.met,
+      counts: data.particles.reduce((acc, p) => {
+        acc[p.type] = (acc[p.type] || 0) + 1;
+        return acc;
+      }, {})
+    });
+
+    const group = particlesGroupRef.current;
+    if (!group) return;
+
+    // Clear old
+    while(group.children.length > 0){ 
+      const child = group.children[0];
+      group.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (Array.isArray(child.material)) {
+         child.material.forEach(m => m.dispose());
+      } else if (child.material) {
+         child.material.dispose();
+      }
+    }
+
+    // Add new particles
+    data.particles.forEach(p => {
+      const vec = new THREE.Vector3(p.px, p.py, p.pz);
+      const length = vec.length();
+      // normalize
+      const dir = vec.clone().normalize();
+      
+      let colorNum = parseInt(p.color.replace('#', '0x'), 16);
+      
+      if (p.type === 'jet') {
+        const coneGeom = new THREE.ConeGeometry(0.5, Math.min(length, 20), 8);
+        coneGeom.translate(0, Math.min(length, 20)/2, 0);
+        coneGeom.rotateX(Math.PI / 2);
+        const coneMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0 });
+        const mesh = new THREE.Mesh(coneGeom, coneMat);
+        mesh.lookAt(dir);
+        group.add(mesh);
+      } else {
+        const points = [new THREE.Vector3(0,0,0), vec];
+        const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+        const lineMat = new THREE.LineBasicMaterial({ color: colorNum, transparent: true, opacity: 0, linewidth: 2 });
+        const line = new THREE.Line(lineGeom, lineMat);
+        group.add(line);
+      }
+    });
+  };
+
+  const togglePlay = () => {
+    const next = !isPlaying;
+    setIsPlaying(next);
+    if(wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(next ? 'play' : 'pause');
+    }
+  };
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#080b14', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1f2937' }}>
+      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+      
+      {/* Stats Overlay */}
+      <div style={{ position: 'absolute', top: '24px', left: '24px', background: 'rgba(19, 19, 23, 0.8)', backdropFilter: 'blur(8px)', border: '1px solid #232328', borderRadius: '8px', padding: '16px', minWidth: '240px' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 12px 0', fontFamily: 'var(--font-geist-mono), monospace' }}>
+          EVENT {stats ? stats.index : '---'} <span style={{ color: '#6b7280', fontSize: '11px' }}>/ 5000</span>
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px', fontSize: '12px' }}>
+          <div>
+            <div style={{ color: '#9ca3af', marginBottom: '2px' }}>HT</div>
+            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{stats ? stats.ht.toFixed(1) : '---'}</div>
+          </div>
+          <div>
+            <div style={{ color: '#9ca3af', marginBottom: '2px' }}>MET</div>
+            <div style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{stats ? stats.met.toFixed(1) : '---'}</div>
+          </div>
+        </div>
+        <div style={{ borderTop: '1px solid #232328', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+          {stats ? Object.entries(stats.counts).map(([type, count]) => (
+            <div key={type} style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#9ca3af', textTransform: 'capitalize' }}>{type}s</span>
+              <span style={{ color: '#d1d5db', fontFamily: 'var(--font-geist-mono), monospace' }}>{count}</span>
+            </div>
+          )) : <div style={{ color: '#6b7280' }}>Waiting for data stream...</div>}
+        </div>
+      </div>
+
+      {/* Controls Overlay */}
+      <button onClick={togglePlay} style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '999px', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)', transition: 'all 0.2s', zIndex: 10 }}>
+        {isPlaying ? <IconPause /> : <IconPlay />}
+      </button>
+    </div>
+  );
+};
 
 export default function App() {
   const [datasets, setDatasets] = useState([]);
@@ -1018,18 +1219,8 @@ export default function App() {
 
           {/* Visualize Tab */}
           {activeTab === 'visualize' && (
-            <div style={{ height: 'calc(100% - 60px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ textAlign: 'center', maxWidth: '360px' }}>
-                <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'center' }}>
-                  <IconActivity />
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 12px 0' }}>
-                  Visualization Tools Unavailable
-                </div>
-                <div style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6 }}>
-                  The OpenGL rendering pipeline is not configured in this build. Wait for future updates to access the particle visualizer.
-                </div>
-              </div>
+            <div style={{ height: 'calc(100% - 60px)' }}>
+              <ParticleVisualization />
             </div>
           )}
 
