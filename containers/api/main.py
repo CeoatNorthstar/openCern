@@ -10,6 +10,8 @@ import requests
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+executor = ThreadPoolExecutor(max_workers=4)
+
 app = FastAPI()
 
 # TODO 1: Add CORS middleware so Electron can call this API
@@ -37,12 +39,12 @@ class Dataset(BaseModel):
 
 
 CMS_HTTP_DATASETS = [
-    {"id": "cms-001", "title": "Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B, TauPlusX dataset. Used in Higgs boson to two tau leptons analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "size": "720000000", "year": 2012},
-    {"id": "cms-002", "title": "Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C, TauPlusX dataset. Used in Higgs boson to two tau leptons analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "size": "720000000", "year": 2012},
-    {"id": "cms-003", "title": "GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion, decaying to two tau leptons.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "size": "720000000", "year": 2012},
-    {"id": "cms-004", "title": "VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson production via vector boson fusion, decaying to two tau leptons.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "size": "720000000", "year": 2012},
-    {"id": "cms-005", "title": "DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process, main background in Higgs to tau tau analysis.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "size": "720000000", "year": 2012},
-    {"id": "cms-006", "title": "TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production background sample.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "size": "720000000", "year": 2012},
+    {"id": "cms-001", "title": "Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "year": 2012},
+    {"id": "cms-002", "title": "Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "year": 2012},
+    {"id": "cms-003", "title": "GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "year": 2012},
+    {"id": "cms-004", "title": "VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "year": 2012},
+    {"id": "cms-005", "title": "DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "year": 2012},
+    {"id": "cms-006", "title": "TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "year": 2012},
 ]
 
 # TODO 3: Create a DownloadStatus model with:
@@ -65,6 +67,15 @@ cancelled_downloads = set()
 
 # from the url = https://opendata.cern.ch/api/records/?type=Dataset&experiment=CMS&file_type=root&page=1&size=20&format=json
 # change the above url to get datasets for ALICE and all experiments and CMS
+#
+def get_file_size(url: str) -> int:
+    try:
+        session = requests.Session()
+        session.verify = False
+        head = session.head(url, allow_redirects=True, timeout=10)
+        return int(head.headers.get("Content-Length", 0))
+    except:
+        return 0
 def convert_xrootd_to_http(uri: str) -> str:
     if uri.startswith("root://eospublic.cern.ch//"):
         return uri.replace("root://eospublic.cern.ch//", "https://eospublic.cern.ch/")
@@ -73,8 +84,12 @@ def convert_xrootd_to_http(uri: str) -> str:
 @app.get("/datasets")
 async def get_datasets(experiment: str = "ALICE"):
     if experiment == "CMS":
-        return [Dataset(**d) for d in CMS_HTTP_DATASETS]
-    
+        results = []
+        for d in CMS_HTTP_DATASETS:
+            size = get_file_size(d["files"][0])
+            results.append(Dataset(**d, size=str(size)))
+        return results
+            
     if experiment == "all":
         url = "https://opendata.cern.ch/api/records/?type=Dataset&file_type=root&page=1&size=20&format=json&subtype=Collision"
     else:
@@ -107,20 +122,42 @@ async def get_datasets(experiment: str = "ALICE"):
 # TODO 6: Write POST /download that:
 def download_file_sync(file_url: str, filename: str):
     filepath = os.path.expanduser(f"~/opencern-datasets/data/{filename}")
-    response = requests.get(file_url, stream=True, verify=False, allow_redirects=True, timeout=600)
-    total_size = int(response.headers.get("Content-Length", 0))
+    
+    session = requests.Session()
+    session.verify = False
+    
+    # Get total size first
+    head = session.head(file_url, allow_redirects=True, timeout=30)
+    total_size = int(head.headers.get("Content-Length", 0))
+    
     downloaded_size = 0
+    max_retries = 10
+    
     with open(filepath, "wb") as f:
-        for chunk in response.iter_content(chunk_size=65536):
+        while downloaded_size < total_size:
             if filename in cancelled_downloads:
                 return
-            if chunk:
-                f.write(chunk)
-                downloaded_size += len(chunk)
-                if total_size > 0:
-                    download_status[filename].progress = (downloaded_size / total_size) * 100
+            
+            headers = {"Range": f"bytes={downloaded_size}-"}
+            
+            try:
+                response = session.get(file_url, headers=headers, stream=True, allow_redirects=True, timeout=60)
+                
+                for chunk in response.iter_content(chunk_size=65536):
+                    if filename in cancelled_downloads:
+                        return
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            download_status[filename].progress = (downloaded_size / total_size) * 100
+            except Exception as e:
+                print(f"Retrying {filename} from {downloaded_size} bytes... {e}")
+                continue
+    
     download_status[filename].status = "done"
     download_status[filename].progress = 100.0
+
 
 async def download_task(file_url: str, filename: str):
     try:
