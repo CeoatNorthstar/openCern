@@ -231,6 +231,7 @@ export default function ParticleVisualization({ filename }) {
     const elapsed = now - eventChangeTimeRef.current;
     
     // 1. Static Detector (Concentric Wireframes)
+    // depthWrite: false ensures the cylinder wireframe acts purely visually and never clips particles
     layers.push(new LineLayer({
       id: 'detector-wireframe',
       data: staticLines,
@@ -238,7 +239,12 @@ export default function ParticleVisualization({ filename }) {
       getTargetPosition: d => d.target,
       getColor: d => d.color,
       getWidth: d => d.width || 0.5,
-      widthUnits: 'pixels'
+      widthUnits: 'pixels',
+      opacity: 0.4,
+      parameters: {
+        depthTest: true,
+        depthWrite: false
+      }
     }));
 
     if (!stats) return layers;
