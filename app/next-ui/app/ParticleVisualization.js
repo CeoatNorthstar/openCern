@@ -23,8 +23,8 @@ export default function ParticleVisualization({ filename }) {
     orbitAxis: 'Y',
     rotationX: 30,
     rotationOrbit: 45,
-    zoom: 0.8,
-    minZoom: 0.1,
+    zoom: -0.2,
+    minZoom: -2,
     maxZoom: 10
   });
 
@@ -230,25 +230,6 @@ export default function ParticleVisualization({ filename }) {
     const layers = [];
     const elapsed = now - eventChangeTimeRef.current;
     
-    // 0. Clouded Meshed Cylinder
-    layers.push(new ColumnLayer({
-      id: 'detector-solid',
-      data: [{ position: [0, 0] }],
-      diskResolution: 48,
-      radius: 220,
-      extruded: true,
-      getElevation: 700,
-      getFillColor: [40, 80, 120, 25], // Thinned down Clouded see-through blue solid
-      elevationScale: 1,
-      modelMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -350, 1],
-      parameters: { 
-        depthTest: true, 
-        depthWrite: false,
-        blend: true,
-        blendFunc: ['SRC_ALPHA', 'ONE_MINUS_SRC_ALPHA', 'ONE', 'ONE_MINUS_SRC_ALPHA']
-      }
-    }));
-
     // 1. Static Detector (Concentric Wireframes)
     // depthWrite: false ensures the cylinder wireframe acts purely visually and never clips particles
     layers.push(new LineLayer({
