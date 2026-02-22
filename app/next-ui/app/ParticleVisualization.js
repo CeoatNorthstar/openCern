@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DeckGL from '@deck.gl/react';
-import { LineLayer, ScatterplotLayer, PathLayer } from '@deck.gl/layers';
+import { LineLayer, ScatterplotLayer, PathLayer, ColumnLayer } from '@deck.gl/layers';
 import { OrbitView } from '@deck.gl/core';
 
 // Easing function for smooth animations
@@ -145,40 +145,82 @@ export default function ParticleVisualization({ filename }) {
   // Precompute static geometry
   const staticLines = useMemo(() => {
     const lines = [];
-    const r = 220;
-    const z = 350;
-    const color = [26, 42, 58];
-    // Barrel
-    for (let i = 0; i < 32; i++) {
-      const a1 = (i / 32) * Math.PI * 2;
-      const a2 = ((i + 1) / 32) * Math.PI * 2;
-      lines.push({ source: [Math.cos(a1)*r, Math.sin(a1)*r, z], target: [Math.cos(a2)*r, Math.sin(a2)*r, z], color });
-      lines.push({ source: [Math.cos(a1)*r, Math.sin(a1)*r, -z], target: [Math.cos(a2)*r, Math.sin(a2)*r, -z], color });
-      lines.push({ source: [Math.cos(a1)*r, Math.sin(a1)*r, z], target: [Math.cos(a1)*r, Math.sin(a1)*r, -z], color });
+    const cOuter = [26, 42, 58]; // #1a2a3a
+    const cInner = [21, 32, 48]; // #152030
+    const cBeam = [36, 52, 71];  // #243447
+    
+    // helper to build a cylindrical wireframe cage
+    const buildCylinder = (radius, zHalfLen, zStep, radialSegments, color, width) => {
+        // Rings
+        for (let z = -zHalfLen; z <= zHalfLen; z += zStep) {
+            for (let i = 0; i < radialSegments; i++) {
+                const a1 = (i / radialSegments) * Math.PI * 2;
+                const a2 = ((i + 1) / radialSegments) * Math.PI * 2;
+                lines.push({ 
+                    source: [Math.cos(a1)*radius, Math.sin(a1)*radius, z], 
+                    target: [Math.cos(a2)*radius, Math.sin(a2)*radius, z], 
+                    color, width 
+                });
+            }
+        }
+        // Longitudinal lines
+        for (let i = 0; i < radialSegments; i++) {
+            const a = (i / radialSegments) * Math.PI * 2;
+            const x = Math.cos(a) * radius;
+            const y = Math.sin(a) * radius;
+            lines.push({ 
+                source: [x, y, -zHalfLen], 
+                target: [x, y, zHalfLen], 
+                color, width 
+            });
+        }
+    };
+
+    // Outer Barrel: R=220, Z=±350, rings every 50, 32 segments
+    buildCylinder(220, 350, 50, 32, cOuter, 0.5);
+    
+    // Endcaps: Z=±350, annulus from R=18 to R=220, 24 spokes + inner ring
+    for (const z of [-350, 350]) {
+        for (let i = 0; i < 24; i++) {
+            const a = (i / 24) * Math.PI * 2;
+            lines.push({ 
+                source: [Math.cos(a)*18, Math.sin(a)*18, z], 
+                target: [Math.cos(a)*220, Math.sin(a)*220, z], 
+                color: cOuter, width: 0.5 
+            });
+            // draw the inner hole ring
+            const a2 = ((i + 1) / 24) * Math.PI * 2;
+            lines.push({ 
+                source: [Math.cos(a)*18, Math.sin(a)*18, z], 
+                target: [Math.cos(a2)*18, Math.sin(a2)*18, z], 
+                color: cOuter, width: 0.5 
+            });
+        }
     }
-    // Endcaps
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2;
-      lines.push({ source: [Math.cos(a)*20, Math.sin(a)*20, z], target: [Math.cos(a)*r, Math.sin(a)*r, z], color });
-      lines.push({ source: [Math.cos(a)*20, Math.sin(a)*20, -z], target: [Math.cos(a)*r, Math.sin(a)*r, -z], color });
-    }
-    // Beam pipe
-    for (let i = 0; i < 8; i++) {
-        const a1 = (i / 8) * Math.PI * 2;
-        const a2 = ((i + 1) / 8) * Math.PI * 2;
-        lines.push({ source: [Math.cos(a1)*4, Math.sin(a1)*4, 500], target: [Math.cos(a2)*4, Math.sin(a2)*4, 500], color: [36, 52, 71] });
-        lines.push({ source: [Math.cos(a1)*4, Math.sin(a1)*4, -500], target: [Math.cos(a2)*4, Math.sin(a2)*4, -500], color: [36, 52, 71] });
-        lines.push({ source: [Math.cos(a1)*4, Math.sin(a1)*4, 500], target: [Math.cos(a1)*4, Math.sin(a1)*4, -500], color: [36, 52, 71] });
-    }
-    // Grid Z=0
+    
+    // Inner Layer 2 (ECAL): R=140, Z=±350, rings every 50, 24 segments
+    buildCylinder(140, 350, 50, 24, cInner, 0.3);
+    
+    // Inner Layer 1 (Tracker): R=80, Z=±350, rings every 50, 16 segments
+    buildCylinder(80, 350, 50, 16, cInner, 0.3);
+
+    // Beam Pipe: R=4, Z=±500, longitudinal lines, 8 segments
+    buildCylinder(4, 500, 1000, 8, cBeam, 0.5);
+
+    // Grid Z=0 Plane
     for (let x = -240; x <= 240; x += 20) {
-        const bound = Math.sqrt(250*250 - x*x);
-        lines.push({ source: [x, -bound, 0], target: [x, bound, 0], color: [26, 42, 58, 76] });
+        if (Math.abs(x) <= 250) {
+            const bound = Math.sqrt(250*250 - x*x);
+            lines.push({ source: [x, -bound, 0], target: [x, bound, 0], color: [26, 42, 58, 76], width: 0.5 });
+        }
     }
     for (let y = -240; y <= 240; y += 20) {
-        const bound = Math.sqrt(250*250 - y*y);
-        lines.push({ source: [-bound, y, 0], target: [bound, y, 0], color: [26, 42, 58, 76] });
+        if (Math.abs(y) <= 250) {
+            const bound = Math.sqrt(250*250 - y*y);
+            lines.push({ source: [-bound, y, 0], target: [bound, y, 0], color: [26, 42, 58, 76], width: 0.5 });
+        }
     }
+
     return lines;
   }, []);
 
@@ -188,14 +230,14 @@ export default function ParticleVisualization({ filename }) {
     const layers = [];
     const elapsed = now - eventChangeTimeRef.current;
     
-    // 1. Static Detector
+    // 1. Static Detector (Concentric Wireframes)
     layers.push(new LineLayer({
       id: 'detector-wireframe',
       data: staticLines,
       getSourcePosition: d => d.source,
       getTargetPosition: d => d.target,
       getColor: d => d.color,
-      getWidth: 0.5,
+      getWidth: d => d.width || 0.5,
       widthUnits: 'pixels'
     }));
 
@@ -266,9 +308,8 @@ export default function ParticleVisualization({ filename }) {
                 let ty = p.py * currentScale;
                 let tz = p.pz * currentScale;
                 
-                // cap at 350 radius
+                // Uncapped tracks allow particles to spray outside the cylinder shell fully
                 const r = Math.sqrt(tx*tx + ty*ty + tz*tz);
-                if (r > 350) { tx *= 350/r; ty *= 350/r; tz *= 350/r; }
 
                 if (isJet && p.jetLines) {
                     // render 8 lines

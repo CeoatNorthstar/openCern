@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import ParticleVisualization from './ParticleVisualization';
+import dynamic from 'next/dynamic';
+
+const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
+  ssr: false,
+});
 
 const formatSize = (bytes) => {
   if (!bytes) return 'Unknown';
