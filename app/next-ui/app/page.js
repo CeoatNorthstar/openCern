@@ -94,6 +94,14 @@ const IconTrash = () => (
   </svg>
 );
 
+const IconInfo = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"></circle>
+    <line x1="12" y1="16" x2="12" y2="12"></line>
+    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+  </svg>
+);
+
 const Logo = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -309,7 +317,8 @@ export default function App() {
           {[
             { id: 'browse', label: 'Models & Data', icon: <IconBrowse /> },
             { id: 'downloaded', label: 'Local Storage', icon: <IconFolder /> },
-            { id: 'visualize', label: 'Visualization', icon: <IconEye /> }
+            { id: 'visualize', label: 'Visualization', icon: <IconEye /> },
+            { id: 'about', label: 'About', icon: <IconInfo /> }
           ].map(tab => (
             <button
               key={tab.id}
@@ -491,7 +500,7 @@ export default function App() {
               border: '1px solid #232328',
               fontWeight: 500
             }}>
-              v1.0.0 (Apple Silicon)
+              v0.1.1 (Apple Silicon)
             </div>
           </div>
         </div>
@@ -735,6 +744,27 @@ export default function App() {
                 <div style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6 }}>
                   The OpenGL rendering pipeline is not configured in this build. Wait for future updates to access the particle visualizer.
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* About Tab */}
+          {activeTab === 'about' && (
+            <div style={{ maxWidth: '640px', margin: '40px auto 0 auto', background: '#131317', padding: '48px', borderRadius: '12px', border: '1px solid #232328', textAlign: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', color: '#f3f4f6', marginBottom: '24px' }}>
+                <Logo />
+              </div>
+              <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#f3f4f6', margin: '0 0 16px 0' }}>OpenCERN Local Explorer</h1>
+              <div style={{ fontSize: '14px', fontWeight: 500, color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)', display: 'inline-block', padding: '4px 12px', borderRadius: '999px', marginBottom: '32px' }}>
+                Version 0.1.1
+              </div>
+              <p style={{ fontSize: '14px', color: '#9ca3af', lineHeight: 1.6, margin: '0 0 32px 0' }}>
+                OpenCERN provides researchers and enthusiasts with streamlined, native access to high-energy physics datasets from the CERN Open Data Portal. Developed for efficiency, built for the future.
+              </p>
+              
+              <div style={{ borderTop: '1px solid #232328', paddingTop: '32px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#6b7280' }}>
+                <div>Built with Next.js, Electron, and Python FastAPI.</div>
+                <div>&copy; {new Date().getFullYear()} OpenCERN Project. All rights reserved.</div>
               </div>
             </div>
           )}
