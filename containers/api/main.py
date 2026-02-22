@@ -6,6 +6,9 @@ import os
 from pydantic import BaseModel
 from typing import List
 from fastapi import BackgroundTasks
+import requests
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 app = FastAPI()
 
@@ -102,26 +105,32 @@ async def get_datasets(experiment: str = "ALICE"):
         return datasets
 
 # TODO 6: Write POST /download that:
+def download_file_sync(file_url: str, filename: str):
+    filepath = os.path.expanduser(f"~/opencern-datasets/data/{filename}")
+    response = requests.get(file_url, stream=True, verify=False, allow_redirects=True, timeout=600)
+    total_size = int(response.headers.get("Content-Length", 0))
+    downloaded_size = 0
+    with open(filepath, "wb") as f:
+        for chunk in response.iter_content(chunk_size=65536):
+            if filename in cancelled_downloads:
+                return
+            if chunk:
+                f.write(chunk)
+                downloaded_size += len(chunk)
+                if total_size > 0:
+                    download_status[filename].progress = (downloaded_size / total_size) * 100
+    download_status[filename].status = "done"
+    download_status[filename].progress = 100.0
+
 async def download_task(file_url: str, filename: str):
     try:
         download_status[filename].status = "downloading"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(file_url)
-            total_size = int(response.headers.get("Content-Length", 0))
-            downloaded_size = 0
-
-            async with aiofiles.open(os.path.expanduser(f"~/opencern-datasets/data/{filename}"), "wb") as f:
-                async for chunk in response.aiter_bytes():
-                    await f.write(chunk)
-                    downloaded_size += len(chunk)
-                    if total_size > 0:
-                        download_status[filename].progress = (downloaded_size / total_size) * 100
-
-        download_status[filename].status = "done"
-        download_status[filename].progress = 100.0
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(executor, download_file_sync, file_url, filename)
     except Exception as e:
         download_status[filename].status = "error"
         print(f"Error downloading {filename}: {e}")
+
 @app.post("/download")
 async def start_download(file_url: str, filename: str, background_tasks: BackgroundTasks):
     # Create data directory if it doesn't exist
@@ -169,10 +178,14 @@ async def list_files():
     files = []
     if os.path.exists(data_dir):
         for filename in os.listdir(data_dir):
+            if filename == ".DS_Store":
+                continue
             file_path = os.path.join(data_dir, filename)
             if os.path.isfile(file_path):
                 size = os.path.getsize(file_path)
                 files.append({"filename": filename, "size": size})
+    # Sort files by name for consistency
+    files.sort(key=lambda x: x["filename"])
     return files
 
 # TODO 9: Write DELETE /files/{filename} that:
@@ -183,6 +196,16 @@ async def delete_file(filename: str):
         os.remove(file_path)
         download_status.pop(filename, None)
         return {"message": f"{filename} deleted"}
+    else:
+        return {"error": "File not found"}
+
+@app.get("/files/{filename}/reveal")
+async def reveal_file(filename: str):
+    file_path = os.path.expanduser(f"~/opencern-datasets/data/{filename}")
+    if os.path.exists(file_path):
+        import subprocess
+        subprocess.run(["open", "-R", file_path])
+        return {"message": f"{filename} revealed"}
     else:
         return {"error": "File not found"}
 
