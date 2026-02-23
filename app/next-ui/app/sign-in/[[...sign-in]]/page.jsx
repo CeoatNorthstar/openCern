@@ -29,9 +29,9 @@ export default function CustomSignIn() {
 
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
-        router.push("/");
+        // The sso-callback handles Desktop Reload mapping 
+        window.location.href = "http://localhost:3000/sso-callback";
       } else {
-        // Handle step up MFA or other requirements here
         console.log(result);
         setError("Further verification required. Check console.");
       }
@@ -43,63 +43,96 @@ export default function CustomSignIn() {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#080b14', padding: '16px', color: '#d1d5db', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        style={{ width: '100%', maxWidth: '448px', backgroundColor: '#131317', border: '1px solid #232328', borderRadius: '16px', padding: '32px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', position: 'relative', overflow: 'hidden' }}
-      >
-        {/* Decorative ambient glow */}
-        <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', height: '100px', backgroundColor: 'rgba(37, 99, 235, 0.2)', filter: 'blur(60px)', pointerEvents: 'none', borderRadius: '9999px' }} />
-
-        <div style={{ position: 'relative', zIndex: 10 }}>
-          <motion.div 
-            initial={{ scale: 0.9 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            style={{ display: 'flex', justifyCenter: 'center', marginBottom: '24px' }}
-          >
-            <div style={{ margin: '0 auto', padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-              <LogIn style={{ width: '32px', height: '32px', color: '#60a5fa' }} />
+    <div style={{ display: 'flex', width: '100vw', minHeight: '100vh', backgroundColor: '#04070a', color: '#ffffff', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      
+      {/* LEFT: Cinematic Showcase (Manim Video) */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#000000', borderRight: '1px solid #1f2937' }}>
+        <video 
+          src="/collision.mp4" 
+          autoPlay 
+          loop 
+          muted 
+          playsInline 
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.65, filter: 'contrast(1.1) brightness(0.9)' }} 
+        />
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'linear-gradient(135deg, rgba(8,11,20,0.4) 0%, rgba(8,11,20,0.1) 100%)' }} />
+        
+        <div style={{ position: 'relative', zIndex: 10, padding: '48px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxSizing: 'border-box' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '32px', height: '32px', backgroundColor: '#2563eb', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                 <div style={{ width: '16px', height: '16px', border: '2px solid white', borderRadius: '50%' }} />
+              </div>
+              <h1 style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '0.05em', margin: 0 }}>openCERN.</h1>
             </div>
-          </motion.div>
+          </div>
+          
+          <div style={{ maxWidth: '450px' }}>
+            <motion.h2 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.8 }}
+              style={{ fontSize: '36px', fontWeight: 600, lineHeight: 1.1, marginBottom: '16px', letterSpacing: '-0.02em' }}
+            >
+              Unprecedented visibility into quantum architectures.
+            </motion.h2>
+            <motion.p 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.8 }}
+              style={{ fontSize: '16px', color: '#9ca3af', lineHeight: 1.5, margin: 0 }}
+            >
+              Enterprise-grade authentication securing the next generation of particle visualization frameworks and massive telemetry datasets.
+            </motion.p>
+          </div>
+        </div>
+      </div>
 
-          <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#ffffff', textAlign: 'center', margin: '0 0 8px 0' }}>Welcome Back</h2>
-          <p style={{ color: '#9ca3af', textAlign: 'center', marginBottom: '32px', fontSize: '14px', margin: '0 0 32px 0' }}>Enter your credentials to access the CERN pipeline.</p>
+      {/* RIGHT: Professional Enterprise Auth Form */}
+      <div style={{ flex: '0 0 500px', backgroundColor: '#0a0d14', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px', position: 'relative' }}>
+        <motion.div 
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          style={{ width: '100%', maxWidth: '380px' }}
+        >
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{ fontSize: '28px', fontWeight: 600, color: '#ffffff', margin: '0 0 8px 0', letterSpacing: '-0.02em' }}>Welcome back</h2>
+            <p style={{ color: '#6b7280', fontSize: '14px', margin: 0 }}>Securely authenticate into the AxionsLab network.</p>
+          </div>
 
-          <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>Email</label>
+          <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 500, color: '#9ca3af', marginLeft: '2px' }}>Enterprise Email</label>
               <div style={{ position: 'relative' }}>
                 <input
                   type="email"
                   value={emailAddress}
                   onChange={(e) => setEmailAddress(e.target.value)}
-                  style={{ width: '100%', backgroundColor: '#0e0e11', border: '1px solid #232328', color: '#ffffff', borderRadius: '12px', padding: '12px 16px 12px 44px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s' }}
-                  onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.5)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#232328'; e.target.style.boxShadow = 'none'; }}
-                  placeholder="physicist@cern.ch"
+                  style={{ width: '100%', backgroundColor: '#11151f', border: '1px solid #1f2937', color: '#ffffff', borderRadius: '8px', padding: '12px 16px 12px 42px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s', fontSize: '14px' }}
+                  onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.backgroundColor = '#161b26'; }}
+                  onBlur={(e) => { e.target.style.borderColor = '#1f2937'; e.target.style.backgroundColor = '#11151f'; }}
+                  placeholder="name@axionslab.com"
                   required
                 />
-                <Mail style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#6b7280' }} />
+                <Mail style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '18px', height: '18px', color: '#6b7280' }} />
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>Password</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 500, color: '#9ca3af', marginLeft: '2px' }}>Password</label>
               <div style={{ position: 'relative' }}>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  style={{ width: '100%', backgroundColor: '#0e0e11', border: '1px solid #232328', color: '#ffffff', borderRadius: '12px', padding: '12px 16px 12px 44px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s' }}
-                  onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.5)'; }}
-                  onBlur={(e) => { e.target.style.borderColor = '#232328'; e.target.style.boxShadow = 'none'; }}
+                  style={{ width: '100%', backgroundColor: '#11151f', border: '1px solid #1f2937', color: '#ffffff', borderRadius: '8px', padding: '12px 16px 12px 42px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s', fontSize: '14px' }}
+                  onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.backgroundColor = '#161b26'; }}
+                  onBlur={(e) => { e.target.style.borderColor = '#1f2937'; e.target.style.backgroundColor = '#11151f'; }}
                   placeholder="••••••••"
                   required
                 />
-                <Lock style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#6b7280' }} />
+                <Lock style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '18px', height: '18px', color: '#6b7280' }} />
               </div>
             </div>
 
@@ -111,35 +144,35 @@ export default function CustomSignIn() {
                   exit={{ opacity: 0, height: 0 }}
                   style={{ overflow: 'hidden' }}
                 >
-                  <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px', marginTop: '16px', display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#f87171', fontSize: '14px' }}>
-                    <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }} />
-                    <p style={{ margin: 0 }}>{error}</p>
+                  <div style={{ backgroundColor: '#1f1315', border: '1px solid #451b1f', borderRadius: '8px', padding: '12px', marginTop: '4px', display: 'flex', alignItems: 'flex-start', gap: '10px', color: '#ef4444', fontSize: '13px' }}>
+                    <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '1px' }} />
+                    <p style={{ margin: 0, lineHeight: 1.4 }}>{error}</p>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
             <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
               disabled={loading}
               type="submit"
-              style={{ width: '100%', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 500, borderRadius: '12px', padding: '12px 16px', transition: 'background-color 0.2s', marginTop: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 0 20px rgba(37, 99, 235, 0.3)', border: '1px solid rgba(96, 165, 250, 0.2)', cursor: loading ? 'not-allowed' : 'pointer' }}
-              onMouseEnter={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#3b82f6'; }}
+              style={{ width: '100%', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 500, borderRadius: '8px', padding: '12px 16px', transition: 'background-color 0.2s', marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', border: '1px solid #1d4ed8', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px' }}
+              onMouseEnter={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#1d4ed8'; }}
               onMouseLeave={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#2563eb'; }}
             >
-              {loading ? <Loader2 style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} /> : "Sign In"}
+              {loading ? <Loader2 style={{ width: '18px', height: '18px', animation: 'spin 1s linear infinite' }} /> : "Secure Logon"}
             </motion.button>
           </form>
 
-          <div style={{ marginTop: '32px', textAlign: 'center', fontSize: '14px', color: '#6b7280' }}>
-            Don't have an account?{" "}
-            <Link href="/sign-up" style={{ color: '#60a5fa', fontWeight: 500, textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={(e) => e.target.style.color = '#93c5fd'} onMouseLeave={(e) => e.target.style.color = '#60a5fa'}>
+          <div style={{ marginTop: '32px', paddingTop: '24px', borderTop: '1px solid #1f2937', textAlign: 'center', fontSize: '13px', color: '#6b7280' }}>
+            Need an authorized account?{" "}
+            <Link href="/sign-up" style={{ color: '#e5e7eb', fontWeight: 500, textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={(e) => e.target.style.color = '#ffffff'} onMouseLeave={(e) => e.target.style.color = '#e5e7eb'}>
               Request access
             </Link>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 }
