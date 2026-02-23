@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "workers/auth-system/**"
+  workflow_dispatch:
 
 jobs:
   deploy:
