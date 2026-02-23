@@ -10,6 +10,7 @@ export default function ConvexClientProvider({ children }) {
   return (
     <ClerkProvider
       publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      allowedRedirectOrigins={["http://localhost:3000", "http://localhost:3002"]}
     >
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
         {children}
