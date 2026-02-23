@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/main/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev --prefix ../next-ui\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev": "concurrently \"npm run dev --prefix ../next-ui\" \"wait-on tcp:3000 && electron .\"",
     "build": "npm run build --prefix ../next-ui && electron-builder"
   },
   "dependencies": {
