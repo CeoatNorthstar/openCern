@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./containers/api
+      dockerfile: Dockerfile
+    container_name: opencern-api
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${HOME}/opencern-datasets:/home/appuser/opencern-datasets
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  streamer:
+    build:
+      context: ./containers/streaming
+      dockerfile: Dockerfile
+    container_name: opencern-streamer
+    ports:
+      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:9002:9002"
+    volumes:
+      - ${HOME}/opencern-datasets/processed:/home/appuser/opencern-datasets/processed:ro
+    restart: unless-stopped
+
+  processor:
+    build:
+      context: ./containers/data-processor
+      dockerfile: Dockerfile
+    image: opencern-processor
+    container_name: opencern-processor-ephemeral
+    profiles:
+      - donotstart
+    volumes:
+      - ${HOME}/opencern-datasets:/home/appuser/opencern-datasets

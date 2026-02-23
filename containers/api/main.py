@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import aiofiles
@@ -13,6 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 executor = ThreadPoolExecutor(max_workers=4)
 
 app = FastAPI()
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 # TODO 1: Add CORS middleware so Electron can call this API
 app.add_middleware(
@@ -264,11 +268,31 @@ async def process_file(filename: str, background_tasks: BackgroundTasks):
 
 def run_processor(filepath: str, filename: str):
     import subprocess
+    # Inside the container, we must invoke docker using the mounted socket.
+    # The filepath provided to the docker run command must be from the perspective
+    # of the data-processor container (which mounts /home/appuser/opencern-datasets)
+    container_filepath = f"/home/appuser/opencern-datasets/data/{filename}"
+    
+    # We must mount the exact same host volume to the ephemeral container.
+    # Note: the environment variable $HOME is not expanding the host's actual path easily 
+    # when we are inside the API container. But docker-compose handles it beautifully.
+    # Better yet, since opencern-processor is in docker-compose.yml as `processor`
+    # and has the volume mapping defined, we can just use `docker compose run`
+    # We must explicitly set the CWD to the compose file directory if possible, but
+    # it's simpler to just do standard docker run and replicate the compose mount.
+    # Wait, passing the actual host ${HOME} is tricky from INSIDE the API container..
+    # Just run `docker run --rm -v /Users/icon/opencern-datasets:/home/appuser/opencern-datasets opencern-processor {container_filepath}`
+    # Wait, hardcoding /Users/icon isn't safe. Let's use docker network. 
+    # Even simpler: since the processor is defined in docker-compose as `processor`, 
+    # we can try `docker run --rm --volumes-from opencern-api opencern-processor {container_filepath}` !
+    
     result = subprocess.run([
-        "python",
-        os.path.expanduser("~/opencern/containers/data-processor/main.py"),
-        filepath
+        "docker", "run", "--rm", 
+        "--volumes-from", "opencern-api", 
+        "opencern-processor", 
+        container_filepath
     ])
+    
     if result.returncode == 0:
         process_status[filename] = "processed"
     else:
@@ -283,6 +307,26 @@ async def get_process_status(filename: str):
     
     status = process_status.get(filename, "idle")
     return {"status": status}
+
+import json
+
+@app.put("/process/data/{filename}")
+async def save_processed_data(filename: str, request: Request):
+    data = await request.json()
+    stem = os.path.splitext(filename)[0]
+    output_file = os.path.expanduser(f"~/opencern-datasets/processed/{stem}.json")
+    with open(output_file, "w") as f:
+        json.dump(data, f)
+    return {"status": "saved"}
+
+@app.delete("/process/data/{filename}")
+async def delete_processed_data(filename: str):
+    stem = os.path.splitext(filename)[0]
+    output_file = os.path.expanduser(f"~/opencern-datasets/processed/{stem}.json")
+    if os.path.exists(output_file):
+        os.remove(output_file)
+        return {"message": f"{stem}.json deleted"}
+    return {"error": "File not found"}
 
 # TODO 10: Run with uvicorn on port 8080
 if __name__ == "__main__":

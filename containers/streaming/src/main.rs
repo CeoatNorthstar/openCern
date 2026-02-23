@@ -27,8 +27,8 @@ struct PaginatedResponse {
 
 #[tokio::main]
 async fn main() {
-    let ws_addr = "127.0.0.1:9001";
-    let api_addr = ([127, 0, 0, 1], 9002);
+    let ws_addr = "0.0.0.0:9001";
+    let api_addr = ([0, 0, 0, 0], 9002);
 
     println!("OpenCERN Streamer starting...");
     

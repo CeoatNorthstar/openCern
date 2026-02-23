@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
   ssr: false,
@@ -178,6 +179,33 @@ export default function App() {
   const [inspectorData, setInspectorData] = useState(null);
   const [inspectorPage, setInspectorPage] = useState(1);
   const [loadingInspector, setLoadingInspector] = useState(false);
+  const editorRef = useRef(null);
+
+  const saveProcessedFile = async (filename) => {
+     if (!editorRef.current) return;
+     const val = editorRef.current.getValue();
+     try {
+        const parsed = JSON.parse(val);
+        await axios.put(`http://localhost:8080/process/data/${filename}?page=${parsed.page}&limit=${parsed.limit}`, parsed);
+        alert('Saved cleanly to disk!');
+     } catch(e) {
+        alert('Invalid JSON structure! Unable to save.');
+     }
+  };
+
+  const deleteProcessedFile = async (filename) => {
+     try {
+        await axios.delete(`http://localhost:8080/process/data/${filename}`);
+        setInspectingFile(null);
+        setInspectorData(null);
+        
+        // Re-fetch local cache
+        const files = await axios.get('http://localhost:8080/files');
+        setDownloaded(files.data);
+     } catch(e) {
+        console.error(e);
+     }
+  };
 
   const triggerDownloadAnimation = (e) => {
     if (!e) return;
@@ -441,6 +469,7 @@ export default function App() {
           {[
             { id: 'browse', label: 'Models & Data', icon: <IconBrowse /> },
             { id: 'downloaded', label: 'Local Storage', icon: <IconFolder /> },
+            { id: 'workspace', label: 'IDE Workspace', icon: <IconFile /> },
             { id: 'visualize', label: 'Visualization', icon: <IconEye /> },
             { id: 'about', label: 'About', icon: <IconInfo /> }
           ].map(tab => (
@@ -997,13 +1026,23 @@ export default function App() {
 
                         {/* JSON Data Render */}
                         <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '8px', fontWeight: 600, letterSpacing: '0.5px' }}>DATA CHUNK (PAGE {inspectorData.page}/{inspectorData.total_pages})</div>
-                        <pre style={{ 
-                          background: '#131317', border: '1px solid #232328', borderRadius: '6px', padding: '16px', 
-                          overflowX: 'auto', fontSize: '10.5px', color: '#a7c080', fontFamily: 'var(--font-geist-mono), monospace',
-                          margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', lineHeight: '1.5'
-                        }}>
-                          {JSON.stringify(inspectorData.events, null, 2)}
-                        </pre>
+                        <div style={{ height: '400px', width: '100%', background: '#131317', border: '1px solid #232328', borderRadius: '6px', overflow: 'hidden' }}>
+                          <Editor
+                            height="100%"
+                            defaultLanguage="json"
+                            theme="vs-dark"
+                            value={JSON.stringify(inspectorData.events, null, 2)}
+                            options={{
+                              readOnly: true,
+                              minimap: { enabled: false },
+                              scrollBeyondLastLine: false,
+                              fontSize: 11,
+                              fontFamily: 'var(--font-geist-mono), Consolas, monospace',
+                              padding: { top: 12, bottom: 12 },
+                              folding: true,
+                            }}
+                          />
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1033,6 +1072,136 @@ export default function App() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* IDE Workspace Tab */}
+          {activeTab === 'workspace' && (
+             <div style={{ display: 'flex', height: 'calc(100vh - 128px)', borderRadius: '8px', border: '1px solid #232328', overflow: 'hidden' }}>
+                {/* Workspace Sidebar */}
+                <div style={{ width: '250px', background: '#131317', borderRight: '1px solid #232328', display: 'flex', flexDirection: 'column' }}>
+                   <div style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: '#9ca3af', letterSpacing: '0.5px', borderBottom: '1px solid #1A1A1A' }}>
+                      EXPLORER
+                   </div>
+                   <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+                      {downloaded.length === 0 ? (
+                         <div style={{ padding: '16px', fontSize: '12px', color: '#6b7280', textAlign: 'center' }}>No datasets available</div>
+                      ) : (
+                         downloaded.filter(f => processing[f.filename] === 'processed').map(f => (
+                            <div key={f.filename}>
+                               <div style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#d1d5db', cursor: 'default' }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.filename}</span>
+                               </div>
+                               <div 
+                                  onClick={() => {
+                                     setInspectingFile(f.filename);
+                                     openInspector(f.filename, 1);
+                                  }}
+                                  style={{ 
+                                     padding: '4px 16px 4px 36px', 
+                                     display: 'flex', 
+                                     alignItems: 'center', 
+                                     gap: '8px', 
+                                     fontSize: '12px', 
+                                     color: inspectingFile === f.filename ? '#ffffff' : '#9ca3af', 
+                                     cursor: 'pointer',
+                                     background: inspectingFile === f.filename ? '#094771' : 'transparent',
+                                     borderLeft: inspectingFile === f.filename ? '2px solid #3b82f6' : '2px solid transparent'
+                                  }}
+                                  onMouseEnter={(e) => !inspectingFile === f.filename && (e.currentTarget.style.color = '#d1d5db')}
+                                  onMouseLeave={(e) => !inspectingFile === f.filename && (e.currentTarget.style.color = '#9ca3af')}
+                               >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbcb41" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16h16V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                  <span style={{ fontFamily: 'var(--font-geist-mono), monospace' }}>{f.filename.replace('.root', '.json')}</span>
+                               </div>
+                            </div>
+                         ))
+                      )}
+                   </div>
+                </div>
+
+                {/* Main Monaco Editor Terminal */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#000000', position: 'relative' }}>
+                   {!inspectingFile ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>
+                         <Logo />
+                         <div style={{ marginTop: '24px', fontSize: '13px' }}>Select a dataset from the Explorer to begin reading telemetry.</div>
+                      </div>
+                   ) : loadingInspector ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#6b7280', gap: '12px', fontSize: '13px' }}>
+                         <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6"></path></svg>
+                         Mounting IDE...
+                      </div>
+                   ) : inspectorData?.error ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#ef4444', fontSize: '13px' }}>
+                         {inspectorData.error}
+                      </div>
+                   ) : inspectorData ? (
+                      <>
+                         {/* Editor Header Path & Controls */}
+                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 24px', background: '#000000', borderBottom: '1px solid #1A1A1A', fontSize: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#9ca3af', fontFamily: 'var(--font-geist-mono), monospace' }}>
+                               workspace <span style={{ color: '#4b5563' }}>/</span> telemetry <span style={{ color: '#4b5563' }}>/</span> <span style={{ color: '#e5e7eb' }}>{inspectingFile.replace('.root', '.json')}</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                               <button onClick={() => saveProcessedFile(inspectingFile)} style={{ background: '#007acc', color: 'white', border: 'none', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>Save File</button>
+                               <button onClick={() => deleteProcessedFile(inspectingFile)} style={{ background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>Delete</button>
+                            </div>
+                         </div>
+                         
+                         {/* Raw Monaco Editor Inject */}
+                         <div style={{ flex: 1, position: 'relative' }}>
+                            <Editor
+                              onMount={(editor) => editorRef.current = editor}
+                              height="100%"
+                              defaultLanguage="json"
+                              theme="vs-dark"
+                              value={JSON.stringify(inspectorData, null, 2)}
+                              options={{
+                                readOnly: false,
+                                minimap: { enabled: true, renderCharacters: false },
+                                scrollBeyondLastLine: false,
+                                fontSize: 13,
+                                fontFamily: 'var(--font-geist-mono), Consolas, monospace',
+                                padding: { top: 24, bottom: 24 },
+                                matchBrackets: 'always',
+                                folding: true,
+                                renderLineHighlight: 'all',
+                              }}
+                            />
+                         </div>
+
+                         {/* Workspace Status Bar */}
+                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', background: '#007acc', color: '#ffffff', fontSize: '11px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                               <span>JSON Dataset</span>
+                               <span>{inspectorData.total_events} events</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                               <button 
+                                 disabled={inspectorData.page <= 1}
+                                 onClick={() => openInspector(inspectingFile, inspectorData.page - 1)}
+                                 style={{ background: 'transparent', border: 'none', color: inspectorData.page <= 1 ? 'rgba(255,255,255,0.5)' : '#ffffff', cursor: inspectorData.page <= 1 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                               >
+                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                                 Prev
+                               </button>
+                               <span>Page {inspectorData.page} / {inspectorData.total_pages}</span>
+                               <button 
+                                 disabled={inspectorData.page >= inspectorData.total_pages}
+                                 onClick={() => openInspector(inspectingFile, inspectorData.page + 1)}
+                                 style={{ background: 'transparent', border: 'none', color: inspectorData.page >= inspectorData.total_pages ? 'rgba(255,255,255,0.5)' : '#ffffff', cursor: inspectorData.page >= inspectorData.total_pages ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                               >
+                                 Next
+                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                               </button>
+                               <span style={{ marginLeft: '8px' }}>UTF-8</span>
+                            </div>
+                         </div>
+                      </>
+                   ) : null}
+                </div>
+             </div>
           )}
 
           {/* Visualize Tab */}
