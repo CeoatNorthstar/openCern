@@ -66,108 +66,116 @@ export default function CustomSignUp() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-[#080b14] p-4 text-[#d1d5db] font-sans">
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#080b14', padding: '16px', color: '#d1d5db', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
-        className="w-full max-w-md bg-[#131317] border border-[#232328] rounded-2xl p-8 shadow-2xl relative overflow-hidden"
+        style={{ width: '100%', maxWidth: '448px', backgroundColor: '#131317', border: '1px solid #232328', borderRadius: '16px', padding: '32px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', position: 'relative', overflow: 'hidden' }}
       >
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[100px] bg-emerald-600/20 blur-[60px] pointer-events-none rounded-full" />
+        <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', height: '100px', backgroundColor: 'rgba(16, 185, 129, 0.2)', filter: 'blur(60px)', pointerEvents: 'none', borderRadius: '9999px' }} />
 
-        <div className="relative z-10">
+        <div style={{ position: 'relative', zIndex: 10 }}>
           {!pendingVerification ? (
             <motion.div key="register" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-              <div className="flex justify-center mb-6">
-                <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
-                  <UserPlus className="w-8 h-8 text-emerald-400" />
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+                <div style={{ padding: '12px', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <UserPlus style={{ width: '32px', height: '32px', color: '#34d399' }} />
                 </div>
               </div>
 
-              <h2 className="text-2xl font-semibold text-white text-center mb-2">Create Account</h2>
-              <p className="text-[#9ca3af] text-center mb-8 text-sm">Register to execute particle simulations.</p>
+              <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#ffffff', textAlign: 'center', margin: '0 0 8px 0' }}>Create Account</h2>
+              <p style={{ color: '#9ca3af', textAlign: 'center', marginBottom: '32px', fontSize: '14px', margin: '0 0 32px 0' }}>Register to execute particle simulations.</p>
 
-              <form onSubmit={handleSignUp} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider ml-1">Email</label>
-                  <div className="relative">
+              <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>Email</label>
+                  <div style={{ position: 'relative' }}>
                     <input
                       type="email"
                       value={emailAddress}
                       onChange={(e) => setEmailAddress(e.target.value)}
-                      className="w-full bg-[#0e0e11] border border-[#232328] text-white rounded-xl px-4 py-3 pl-11 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                      style={{ width: '100%', backgroundColor: '#0e0e11', border: '1px solid #232328', color: '#ffffff', borderRadius: '12px', padding: '12px 16px 12px 44px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s' }}
+                      onFocus={(e) => { e.target.style.borderColor = '#10b981'; e.target.style.boxShadow = '0 0 0 1px rgba(16, 185, 129, 0.5)'; }}
+                      onBlur={(e) => { e.target.style.borderColor = '#232328'; e.target.style.boxShadow = 'none'; }}
                       placeholder="physicist@cern.ch"
                       required
                     />
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7280]" />
+                    <Mail style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#6b7280' }} />
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider ml-1">Password</label>
-                  <div className="relative">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>Password</label>
+                  <div style={{ position: 'relative' }}>
                     <input
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-[#0e0e11] border border-[#232328] text-white rounded-xl px-4 py-3 pl-11 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                      style={{ width: '100%', backgroundColor: '#0e0e11', border: '1px solid #232328', color: '#ffffff', borderRadius: '12px', padding: '12px 16px 12px 44px', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s' }}
+                      onFocus={(e) => { e.target.style.borderColor = '#10b981'; e.target.style.boxShadow = '0 0 0 1px rgba(16, 185, 129, 0.5)'; }}
+                      onBlur={(e) => { e.target.style.borderColor = '#232328'; e.target.style.boxShadow = 'none'; }}
                       placeholder="••••••••"
                       required
                     />
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7280]" />
+                    <Lock style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#6b7280' }} />
                   </div>
                 </div>
 
                 <AnimatePresence>
                   {error && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mt-4 flex items-start gap-2 text-red-400 text-sm">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <p>{error}</p>
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
+                      <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px', marginTop: '16px', display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#f87171', fontSize: '14px' }}>
+                        <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }} />
+                        <p style={{ margin: 0 }}>{error}</p>
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
                 <motion.button
-                  whileHover={{ scale: 1.01 }}
+                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   disabled={loading}
                   type="submit"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl px-4 py-3 transition-colors mt-6 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.3)] border border-emerald-400/20"
+                  style={{ width: '100%', backgroundColor: '#059669', color: '#ffffff', fontWeight: 500, borderRadius: '12px', padding: '12px 16px', transition: 'background-color 0.2s', marginTop: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 0 20px rgba(16, 185, 129, 0.3)', border: '1px solid rgba(52, 211, 153, 0.2)', cursor: loading ? 'not-allowed' : 'pointer' }}
+                  onMouseEnter={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#10b981'; }}
+                  onMouseLeave={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#059669'; }}
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Continue"}
+                  {loading ? <Loader2 style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} /> : "Continue"}
                 </motion.button>
               </form>
 
-              <div className="mt-8 text-center text-sm text-[#6b7280]">
+              <div style={{ marginTop: '32px', textAlign: 'center', fontSize: '14px', color: '#6b7280' }}>
                 Already have an account?{" "}
-                <Link href="/sign-in" className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
+                <Link href="/sign-in" style={{ color: '#34d399', fontWeight: 500, textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={(e) => e.target.style.color = '#6ee7b7'} onMouseLeave={(e) => e.target.style.color = '#34d399'}>
                   Sign In
                 </Link>
               </div>
             </motion.div>
           ) : (
             <motion.div key="verify" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <div className="flex justify-center mb-6">
-                <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
-                  <ShieldCheck className="w-8 h-8 text-blue-400" />
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+                <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: '12px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                  <ShieldCheck style={{ width: '32px', height: '32px', color: '#60a5fa' }} />
                 </div>
               </div>
 
-              <h2 className="text-2xl font-semibold text-white text-center mb-2">Verify Email</h2>
-              <p className="text-[#9ca3af] text-center mb-8 text-sm">
-                We've sent a secure access code to <span className="text-white">{emailAddress}</span>.
+              <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#ffffff', textAlign: 'center', margin: '0 0 8px 0' }}>Verify Email</h2>
+              <p style={{ color: '#9ca3af', textAlign: 'center', marginBottom: '32px', fontSize: '14px', margin: '0 0 32px 0' }}>
+                We've sent a secure access code to <span style={{ color: '#ffffff' }}>{emailAddress}</span>.
               </p>
 
-              <form onSubmit={handleVerify} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider ml-1">Access Code</label>
+              <form onSubmit={handleVerify} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>Access Code</label>
                   <input
                     type="text"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
-                    className="w-full bg-[#0e0e11] border border-[#232328] text-white rounded-xl px-4 py-4 text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:tracking-normal placeholder:text-base font-mono"
+                    style={{ width: '100%', backgroundColor: '#0e0e11', border: '1px solid #232328', color: '#ffffff', borderRadius: '12px', padding: '16px', textAlign: 'center', fontSize: '24px', letterSpacing: '0.5em', fontFamily: 'monospace', boxSizing: 'border-box', outline: 'none', transition: 'all 0.2s' }}
+                    onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.5)'; }}
+                    onBlur={(e) => { e.target.style.borderColor = '#232328'; e.target.style.boxShadow = 'none'; }}
                     placeholder="Enter code"
                     required
                   />
@@ -175,23 +183,25 @@ export default function CustomSignUp() {
 
                 <AnimatePresence>
                   {error && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mt-4 flex items-start gap-2 text-red-400 text-sm">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <p>{error}</p>
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
+                      <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px', marginTop: '16px', display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#f87171', fontSize: '14px' }}>
+                        <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }} />
+                        <p style={{ margin: 0 }}>{error}</p>
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
                 <motion.button
-                  whileHover={{ scale: 1.01 }}
+                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   disabled={loading}
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl px-4 py-3 transition-colors mt-6 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.3)] border border-blue-400/20"
+                  style={{ width: '100%', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 500, borderRadius: '12px', padding: '12px 16px', transition: 'background-color 0.2s', marginTop: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 0 20px rgba(37, 99, 235, 0.3)', border: '1px solid rgba(96, 165, 250, 0.2)', cursor: loading ? 'not-allowed' : 'pointer' }}
+                  onMouseEnter={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#3b82f6'; }}
+                  onMouseLeave={(e) => { if(!loading) e.currentTarget.style.backgroundColor = '#2563eb'; }}
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & Enter"}
+                  {loading ? <Loader2 style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} /> : "Verify & Enter"}
                 </motion.button>
               </form>
             </motion.div>
