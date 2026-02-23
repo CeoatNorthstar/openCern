@@ -8,7 +8,6 @@ The application covers the complete data pipeline from discovery to visualizatio
 
 Every component of this pipeline runs locally on the user's machine. No cloud. No API keys. No accounts. The data comes directly from CERN's public servers.
 
----
 
 ## Table of Contents
 
