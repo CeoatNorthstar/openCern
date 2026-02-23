@@ -1,0 +1,11 @@
+name = "opencern-auth-system"
+main = "src/index.ts"
+compatibility_date = "2024-02-22"
+
+[observability]
+enabled = true
+
+[vars]
+# CLERK_WEBHOOK_SECRET and RESEND_API_KEY will be set via 
+# wrangler secret put CLERK_WEBHOOK_SECRET 
+# wrangler secret put RESEND_API_KEY 

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 
 const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
   ssr: false,
@@ -613,10 +614,18 @@ export default function App() {
           alignItems: 'center',
           justifyContent: 'flex-end', /* Pushing content to right, title implied by nav */
         }}>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
             <div style={{ fontSize: '11px', color: '#6b7280', background: '#131317', padding: '4px 10px', borderRadius: '4px', border: '1px solid #232328', fontWeight: 500 }}>
               v0.1.3 — base pipeline complete
             </div>
+            <SignedOut>
+              <div style={{ background: '#2563eb', color: '#f8fafc', padding: '4px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', transition: 'opacity 0.2s', border: '1px solid #1d4ed8' }} onMouseEnter={(e) => e.target.style.opacity = '0.9'} onMouseLeave={(e) => e.target.style.opacity = '1'}>
+                <SignInButton />
+              </div>
+            </SignedOut>
+            <SignedIn>
+              <UserButton appearance={{ elements: { userButtonAvatarBox: "w-7 h-7" } }} />
+            </SignedIn>
           </div>
         </div>
 
