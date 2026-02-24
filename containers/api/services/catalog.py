@@ -22,12 +22,12 @@ log = logging.getLogger("opencern.catalog")
 # Featured CMS datasets (direct HTTP links, instant access)
 # ──────────────────────────────────────────────────────────────────
 CMS_FEATURED = [
-    {"id": "cms-001", "title": "★ Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "size": "4400000", "year": 2012},
-    {"id": "cms-002", "title": "★ Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "size": "4400000", "year": 2012},
-    {"id": "cms-003", "title": "★ GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "size": "2100000", "year": 2012},
-    {"id": "cms-004", "title": "★ VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "size": "1600000", "year": 2012},
-    {"id": "cms-005", "title": "★ DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "size": "3700000", "year": 2012},
-    {"id": "cms-006", "title": "★ TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "size": "61000000", "year": 2012},
+    {"id": "cms-001", "title": "★ Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "size": "1088113510", "year": 2012},
+    {"id": "cms-002", "title": "★ Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "size": "1549014154", "year": 2012},
+    {"id": "cms-003", "title": "★ GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "size": "20460281", "year": 2012},
+    {"id": "cms-004", "title": "★ VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "size": "24184554", "year": 2012},
+    {"id": "cms-005", "title": "★ DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "size": "925979447", "year": 2012},
+    {"id": "cms-006", "title": "★ TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "size": "353710208", "year": 2012},
 ]
 
 # ──────────────────────────────────────────────────────────────────

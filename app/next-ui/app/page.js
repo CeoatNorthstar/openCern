@@ -14,9 +14,15 @@ const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
 });
 
 const formatSize = (bytes) => {
-  if (!bytes) return 'Unknown';
-  const mb = bytes / (1024 * 1024);
-  return mb > 1000 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(1)} MB`;
+  if (!bytes || bytes <= 0) return 'Unknown';
+  const tb = bytes / (1024 ** 4);
+  if (tb >= 1) return `${tb.toFixed(1)} TB`;
+  const gb = bytes / (1024 ** 3);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 ** 2);
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  const kb = bytes / 1024;
+  return `${kb.toFixed(0)} KB`;
 };
 
 // --- SVG Icons ---
