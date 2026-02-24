@@ -177,6 +177,7 @@ export default function App() {
   const [downloaded, setDownloaded] = useState([]);
   const [downloading, setDownloading] = useState({});
   const [processing, setProcessing] = useState({});
+  const [filePicker, setFilePicker] = useState(null); // { dataset, selectedFiles: Set }
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
@@ -411,6 +412,14 @@ export default function App() {
 
   const handleDownload = async (dataset, e) => {
     if (e) triggerDownloadAnimation(e);
+    
+    // Multi-file dataset: open file picker
+    if (dataset.files.length > 1) {
+      setFilePicker({ dataset, selectedFiles: new Set(dataset.files) });
+      return;
+    }
+    
+    // Single file: download directly
     const file = dataset.files[0];
     const filename = file.split('/').pop();
     setDownloading(prev => ({ ...prev, [filename]: { progress: 0, status: 'downloading', dataset } }));
@@ -446,6 +455,54 @@ export default function App() {
         // tracking error
       }
     }, 500);
+  };
+
+  const handleMultiDownload = async () => {
+    if (!filePicker) return;
+    const { dataset, selectedFiles } = filePicker;
+    const files = Array.from(selectedFiles);
+    setFilePicker(null);
+
+    try {
+      const res = await axios.post('http://localhost:8080/download/multi', {
+        dataset_title: dataset.title,
+        files: files,
+      });
+      const folder = res.data.folder;
+      for (const f of res.data.files) {
+        setDownloading(prev => ({
+          ...prev,
+          [f.track_key]: { progress: 0, status: 'downloading', dataset }
+        }));
+        // Track individual file progress
+        const trackKey = f.track_key;
+        const interval = setInterval(async () => {
+          try {
+            const r = await axios.get(`http://localhost:8080/download/status?filename=${trackKey}`);
+            setDownloading(prev => {
+              if (!prev[trackKey]) return prev;
+              return { ...prev, [trackKey]: { ...prev[trackKey], progress: r.data.progress, status: r.data.status } };
+            });
+            if (r.data.status === 'done' || r.data.status === 'error') {
+              clearInterval(interval);
+              setDownloading(prev => { const n = { ...prev }; delete n[trackKey]; return n; });
+              const files = await axios.get('http://localhost:8080/files');
+              setDownloaded(files.data);
+            }
+          } catch (e) {}
+        }, 500);
+      }
+    } catch (e) {
+      console.error('Multi-download failed:', e);
+    }
+  };
+
+  const toggleFileInPicker = (url) => {
+    if (!filePicker) return;
+    const newSet = new Set(filePicker.selectedFiles);
+    if (newSet.has(url)) newSet.delete(url);
+    else newSet.add(url);
+    setFilePicker({ ...filePicker, selectedFiles: newSet });
   };
 
   const isDownloaded = (dataset) => {
@@ -1311,6 +1368,112 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* File Picker Modal */}
+      {filePicker && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setFilePicker(null)}>
+          <div style={{
+            background: '#18181b', border: '1px solid #2a2a2e', borderRadius: '12px',
+            width: '560px', maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+          }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #232328' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#f3f4f6', fontWeight: 600 }}>
+                Select Files to Download
+              </h3>
+              <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#9ca3af' }}>
+                {filePicker.dataset.title}
+              </p>
+            </div>
+
+            {/* Controls */}
+            <div style={{
+              padding: '12px 24px', display: 'flex', gap: '12px', fontSize: '12px',
+              borderBottom: '1px solid #1f1f26',
+            }}>
+              <button onClick={() => setFilePicker({ ...filePicker, selectedFiles: new Set(filePicker.dataset.files) })}
+                style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '12px' }}>
+                Select All
+              </button>
+              <button onClick={() => setFilePicker({ ...filePicker, selectedFiles: new Set() })}
+                style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '12px' }}>
+                Select None
+              </button>
+              <span style={{ marginLeft: 'auto', color: '#6b7280' }}>
+                {filePicker.selectedFiles.size} of {filePicker.dataset.files.length} selected
+              </span>
+            </div>
+
+            {/* File List */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
+              {filePicker.dataset.files.map((url, i) => {
+                const name = url.split('/').pop();
+                const isChecked = filePicker.selectedFiles.has(url);
+                return (
+                  <div key={i}
+                    onClick={() => toggleFileInPicker(url)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '10px 24px', cursor: 'pointer',
+                      background: isChecked ? 'rgba(59,130,246,0.08)' : 'transparent',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = isChecked ? 'rgba(59,130,246,0.12)' : '#1f1f26'}
+                    onMouseLeave={e => e.currentTarget.style.background = isChecked ? 'rgba(59,130,246,0.08)' : 'transparent'}
+                  >
+                    <div style={{
+                      width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
+                      border: isChecked ? '2px solid #3b82f6' : '2px solid #4b5563',
+                      background: isChecked ? '#3b82f6' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}>
+                      {isChecked && <span style={{ color: '#fff', fontSize: '11px', fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{
+                      fontSize: '13px', color: '#e5e7eb',
+                      fontFamily: 'var(--font-geist-mono), monospace',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                    }}>
+                      {name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '16px 24px', borderTop: '1px solid #232328',
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px',
+            }}>
+              <button onClick={() => setFilePicker(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', fontSize: '13px', fontWeight: 500,
+                  border: '1px solid #232328', background: '#131317', color: '#9ca3af', cursor: 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button onClick={handleMultiDownload}
+                disabled={filePicker.selectedFiles.size === 0}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', fontSize: '13px', fontWeight: 500,
+                  border: 'none', cursor: filePicker.selectedFiles.size === 0 ? 'not-allowed' : 'pointer',
+                  background: filePicker.selectedFiles.size === 0 ? '#1e1e24' : '#2563eb',
+                  color: filePicker.selectedFiles.size === 0 ? '#4b5563' : '#fff',
+                  transition: 'all 0.15s',
+                }}>
+                Download {filePicker.selectedFiles.size} File{filePicker.selectedFiles.size !== 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

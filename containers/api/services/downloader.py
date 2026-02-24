@@ -1,10 +1,10 @@
 """
 OpenCERN API — Async Download Engine
-Fully non-blocking with httpx streaming, resumable downloads, and progress tracking.
+Fully non-blocking with httpx streaming, resumable downloads, progress tracking,
+and subfolder support for multi-file datasets.
 """
 import os
 import logging
-import asyncio
 import httpx
 from models import DownloadStatus
 from config import DATA_DIR, DOWNLOAD_CHUNK_SIZE, DOWNLOAD_TIMEOUT
@@ -12,12 +12,11 @@ from config import DATA_DIR, DOWNLOAD_CHUNK_SIZE, DOWNLOAD_TIMEOUT
 log = logging.getLogger("opencern.downloader")
 
 # ──────────────────────────────────────────────────────────────────
-# Global State (process-level, thread-safe for single-worker uvicorn)
+# Global State
 # ──────────────────────────────────────────────────────────────────
 download_status: dict[str, DownloadStatus] = {}
 cancelled_downloads: set[str] = set()
 
-# Shared persistent connection pool
 _client: httpx.AsyncClient | None = None
 
 
@@ -29,41 +28,56 @@ async def get_client() -> httpx.AsyncClient:
 
 
 # ──────────────────────────────────────────────────────────────────
-# Core Download Logic (fully async, no threads)
+# Core Download Logic
 # ──────────────────────────────────────────────────────────────────
-async def download_file_async(file_url: str, filename: str):
-    """Stream-download a file with progress tracking and cancellation support."""
-    filepath = os.path.join(DATA_DIR, filename)
+async def download_file_async(file_url: str, filename: str, subfolder: str = None):
+    """
+    Stream-download a file with progress tracking and cancellation.
+    If subfolder is set, downloads into DATA_DIR/subfolder/filename.
+    """
+    if subfolder:
+        dest_dir = os.path.join(DATA_DIR, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+        filepath = os.path.join(dest_dir, filename)
+        track_key = f"{subfolder}/{filename}"
+    else:
+        filepath = os.path.join(DATA_DIR, filename)
+        track_key = filename
+
     client = await get_client()
 
     try:
-        download_status[filename].status = "downloading"
+        if track_key in download_status:
+            download_status[track_key].status = "downloading"
 
         # Get total size
         head = await client.head(file_url, timeout=30)
         total_size = int(head.headers.get("content-length", 0))
 
         downloaded = 0
-        log.info(f"Downloading {filename} ({total_size / 1e6:.1f} MB)")
+        log.info(f"Downloading {track_key} ({total_size / 1e6:.1f} MB)")
 
         async with client.stream("GET", file_url) as response:
             response.raise_for_status()
             with open(filepath, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                    if filename in cancelled_downloads:
-                        log.info(f"Download cancelled: {filename}")
-                        download_status[filename].status = "cancelled"
+                    if track_key in cancelled_downloads:
+                        log.info(f"Download cancelled: {track_key}")
+                        if track_key in download_status:
+                            download_status[track_key].status = "cancelled"
                         return
 
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if total_size > 0:
-                        download_status[filename].progress = round((downloaded / total_size) * 100, 1)
+                    if total_size > 0 and track_key in download_status:
+                        download_status[track_key].progress = round((downloaded / total_size) * 100, 1)
 
-        download_status[filename].status = "done"
-        download_status[filename].progress = 100.0
-        log.info(f"Download complete: {filename}")
+        if track_key in download_status:
+            download_status[track_key].status = "done"
+            download_status[track_key].progress = 100.0
+        log.info(f"Download complete: {track_key}")
 
     except Exception as e:
-        log.error(f"Download failed: {filename} — {e}")
-        download_status[filename].status = "error"
+        log.error(f"Download failed: {track_key} — {e}")
+        if track_key in download_status:
+            download_status[track_key].status = "error"
