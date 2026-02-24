@@ -5,16 +5,15 @@ RUN apt-get update && apt-get install -y curl docker.io && rm -rf /var/lib/apt/l
 
 # Set up non-root user
 RUN useradd -m -u 1000 appuser
-
 WORKDIR /app
 
-# Install Python requirements
 RUN pip install --no-cache-dir fastapi uvicorn httpx requests pydantic python-multipart aiofiles
 
-# Copy the application code
-COPY main.py .
+# Copy the entire API application
+COPY main.py config.py models.py ./
+COPY routers/ ./routers/
+COPY services/ ./services/
 
-# Change ownership
 RUN chown -R appuser:appuser /app
 USER appuser
 
