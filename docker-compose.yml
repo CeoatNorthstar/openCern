@@ -50,7 +50,7 @@ services:
 
   processor:
     build:
-      context: ./containers/data-processor
+      context: ./containers/cpp-processor
       dockerfile: Dockerfile
     image: opencern-processor
     container_name: opencern-processor-ephemeral
