@@ -22,12 +22,12 @@ log = logging.getLogger("opencern.catalog")
 # Featured CMS datasets (direct HTTP links, instant access)
 # ──────────────────────────────────────────────────────────────────
 CMS_FEATURED = [
-    {"id": "cms-001", "title": "★ Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "year": 2012},
-    {"id": "cms-002", "title": "★ Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "year": 2012},
-    {"id": "cms-003", "title": "★ GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "year": 2012},
-    {"id": "cms-004", "title": "★ VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "year": 2012},
-    {"id": "cms-005", "title": "★ DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "year": 2012},
-    {"id": "cms-006", "title": "★ TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "year": 2012},
+    {"id": "cms-001", "title": "★ Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "size": "4400000", "year": 2012},
+    {"id": "cms-002", "title": "★ Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "size": "4400000", "year": 2012},
+    {"id": "cms-003", "title": "★ GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "size": "2100000", "year": 2012},
+    {"id": "cms-004", "title": "★ VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "size": "1600000", "year": 2012},
+    {"id": "cms-005", "title": "★ DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "size": "3700000", "year": 2012},
+    {"id": "cms-006", "title": "★ TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "size": "61000000", "year": 2012},
 ]
 
 # ──────────────────────────────────────────────────────────────────
@@ -68,12 +68,19 @@ def _parse_records(records: list) -> List[Dataset]:
         if not files:
             recid = str(r.get("id", ""))
             files = [f"https://opendata.cern.ch/record/{recid}"]
+
+        # Size: try files[].size first, then distribution.size fallback
+        total_size = sum(f.get("size", 0) for f in raw_files)
+        if total_size == 0:
+            dist = m.get("distribution", {})
+            total_size = dist.get("size", 0)
+
         out.append(Dataset(
             id=str(r.get("id", "")),
             title=m.get("title", "Untitled"),
             description=m.get("abstract", {}).get("description", ""),
             files=files,
-            size=str(sum(f.get("size", 0) for f in raw_files)),
+            size=str(total_size),
             year=int(m.get("date_created", ["0"])[0]) if m.get("date_created") else 0,
         ))
     return out
@@ -133,7 +140,7 @@ async def fetch_datasets(client: httpx.AsyncClient, experiment: str, page: int =
 
     if exp == "CMS" and page == 1:
         # Page 1 of CMS: show featured datasets first, then fill with CERN API
-        featured = [Dataset(**d, size="0") for d in CMS_FEATURED]
+        featured = [Dataset(**d) for d in CMS_FEATURED]
         remaining = size - len(featured)
         if remaining > 0:
             cern = await _fetch_page(client, "CMS", 1, remaining)
