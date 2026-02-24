@@ -2,6 +2,25 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DeckGL from '@deck.gl/react';
 import { LineLayer, ScatterplotLayer, PathLayer, ColumnLayer } from '@deck.gl/layers';
 import { OrbitView } from '@deck.gl/core';
+import { CanvasContext } from '@luma.gl/core';
+
+// Patch luma.gl CanvasContext to guard against a race condition where the
+// ResizeObserver fires before WebGLDevice finishes assigning `this.limits`.
+// See: luma.gl v9.2.6 — CanvasContext constructor sets up a ResizeObserver
+// that can call getMaxDrawingBufferSize() before the device's `limits` field
+// is initialized, causing "Cannot read properties of undefined (reading
+// 'maxTextureDimension2D')".
+if (typeof CanvasContext?.prototype?.getMaxDrawingBufferSize === 'function') {
+  const _origGetMaxSize = CanvasContext.prototype.getMaxDrawingBufferSize;
+  CanvasContext.prototype.getMaxDrawingBufferSize = function () {
+    if (!this.device?.limits) {
+      // Return a safe default until the device is fully initialized.
+      // 8192 is the minimum MAX_TEXTURE_SIZE guaranteed by WebGL2.
+      return [8192, 8192];
+    }
+    return _origGetMaxSize.call(this);
+  };
+}
 
 // Easing function for smooth animations
 const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
@@ -16,7 +35,30 @@ export default function ParticleVisualization({ filename }) {
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const totalEvents = 5000;
-  
+
+  // Guard: only mount DeckGL once the container has real pixel dimensions
+  // so that luma.gl can obtain a valid WebGL2 context and query device limits.
+  const containerRef = useRef(null);
+  const [glReady, setGlReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const check = () => {
+      if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+        setGlReady(true);
+      }
+    };
+
+    // Initial check (may already be sized)
+    check();
+
+    const ro = new ResizeObserver(() => check());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const wsRef = useRef(null);
   const [viewState, setViewState] = useState({
     target: [0, 0, 0],
@@ -497,19 +539,22 @@ export default function ParticleVisualization({ filename }) {
     <div style={{ position: 'relative', width: '100%', height: '100%', background: 'radial-gradient(circle at center, #0d1117 0%, #080b14 70%)', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1f2937' }}>
       
       {/* Background canvas filler */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }} 
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 0 }} 
            onMouseDown={() => lastInteractionRef.current = Date.now()}
            onWheel={() => lastInteractionRef.current = Date.now()}
            onKeyDown={() => lastInteractionRef.current = Date.now()} >
-          <DeckGL
-            views={new OrbitView({ id: 'orbit-view', orbitAxis: 'Y' })}
-            viewState={viewState}
-            onViewStateChange={({ viewState }) => { lastInteractionRef.current = Date.now(); setViewState(viewState); }}
-            controller={{ doubleClickZoom: false, touchRotate: true }}
-            layers={getLayers()}
-            style={{ width: '100%', height: '100%' }}
-            getCursor={({isHovering, isDragging}) => isDragging ? 'grabbing' : 'grab'}
-          />
+          {glReady && (
+            <DeckGL
+              views={new OrbitView({ id: 'orbit-view', orbitAxis: 'Y' })}
+              viewState={viewState}
+              onViewStateChange={({ viewState }) => { lastInteractionRef.current = Date.now(); setViewState(viewState); }}
+              controller={{ doubleClickZoom: false, touchRotate: true }}
+              layers={getLayers()}
+              style={{ width: '100%', height: '100%' }}
+              getCursor={({isHovering, isDragging}) => isDragging ? 'grabbing' : 'grab'}
+              onError={(error) => console.warn('DeckGL initialization error:', error)}
+            />
+          )}
       </div>
 
       {loading && (

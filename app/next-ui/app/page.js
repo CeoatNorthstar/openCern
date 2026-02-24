@@ -4,7 +4,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+
+// Monaco wrapper that loads the editor entirely at runtime to avoid Turbopack
+// trying to resolve the CDN URL inside @monaco-editor/loader as a filesystem path.
+const Editor = dynamic(() => import('./MonacoEditor'), { ssr: false });
 
 const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
   ssr: false,

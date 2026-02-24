@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@monaco-editor/react", "@monaco-editor/loader"],
-  serverExternalPackages: ["monaco-editor"],
+  serverExternalPackages: ["monaco-editor", "@monaco-editor/react", "@monaco-editor/loader"],
 };
 
 export default nextConfig;
