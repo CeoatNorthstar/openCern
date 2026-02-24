@@ -31,6 +31,23 @@ services:
       - ${HOME}/opencern-datasets/processed:/home/appuser/opencern-datasets/processed:ro
     restart: unless-stopped
 
+  xrootd:
+    build:
+      context: ./containers/xrootd
+      dockerfile: Dockerfile
+    container_name: opencern-xrootd
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ${HOME}/opencern-datasets:/home/appuser/opencern-datasets
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
   processor:
     build:
       context: ./containers/data-processor

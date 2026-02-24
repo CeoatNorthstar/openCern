@@ -174,6 +174,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalDatasets, setTotalDatasets] = useState(0);
   const [visualizeFile, setVisualizeFile] = useState(null);
   
   // Inspector states
@@ -366,21 +369,31 @@ export default function App() {
     }
 
     setLoading(true);
-    // Fetch depending on the selected experiment
+    // Fetch depending on the selected experiment with pagination
     if (experiment === 'All') {
       Promise.all([
-        axios.get('http://localhost:8080/datasets?experiment=ALICE'),
+        axios.get(`http://localhost:8080/datasets?experiment=ALICE&page=${page}&size=20`),
         axios.get('http://localhost:8080/datasets?experiment=CMS')
       ])
         .then(([resAlice, resCms]) => {
-          setDatasets([...resAlice.data, ...resCms.data]);
+          const aliceData = resAlice.data.datasets || resAlice.data;
+          const cmsData = resCms.data.datasets || resCms.data;
+          setDatasets([...aliceData, ...cmsData]);
+          setTotalPages(resAlice.data.pages || 1);
+          setTotalDatasets((resAlice.data.total || 0) + (cmsData.length || 0));
           setLoading(false);
         })
         .catch(() => setLoading(false));
     } else {
       const expParam = experiment === 'Alice' ? 'ALICE' : experiment;
-      axios.get(`http://localhost:8080/datasets?experiment=${expParam}`)
-        .then(r => { setDatasets(r.data); setLoading(false); })
+      axios.get(`http://localhost:8080/datasets?experiment=${expParam}&page=${page}&size=20`)
+        .then(r => {
+          const data = r.data;
+          setDatasets(data.datasets || data);
+          setTotalPages(data.pages || 1);
+          setTotalDatasets(data.total || (data.datasets || data).length);
+          setLoading(false);
+        })
         .catch(() => setLoading(false));
     }
 
@@ -388,7 +401,7 @@ export default function App() {
       .then(r => setDownloaded(r.data))
       .catch(() => {});
       
-  }, [experiment]);
+  }, [experiment, page]);
 
   const handleDownload = async (dataset, e) => {
     if (e) triggerDownloadAnimation(e);
@@ -675,10 +688,10 @@ export default function App() {
 
                 {/* Experiment Filter */}
                 <div style={{ display: 'flex', background: '#131317', padding: '4px', borderRadius: '8px', border: '1px solid #232328' }}>
-                  {['All', 'CMS', 'Alice'].map(exp => (
+                  {['All', 'CMS', 'Alice', 'ATLAS'].map(exp => (
                     <button
                       key={exp}
-                      onClick={() => setExperiment(exp)}
+                      onClick={() => { setExperiment(exp); setPage(1); }}
                       style={{
                         padding: '6px 16px',
                         borderRadius: '6px',
@@ -815,6 +828,56 @@ export default function App() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Pagination Controls */}
+              {!loading && totalPages > 1 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '16px', marginTop: '32px', paddingTop: '24px',
+                  borderTop: '1px solid #1f1f26'
+                }}>
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    style={{
+                      padding: '8px 20px', borderRadius: '6px', border: '1px solid #232328',
+                      cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: 500,
+                      color: page <= 1 ? '#4b5563' : '#f3f4f6',
+                      background: page <= 1 ? '#131317' : '#1e1e24',
+                      opacity: page <= 1 ? 0.5 : 1,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    ← Previous
+                  </button>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', color: '#9ca3af', fontWeight: 500 }}>
+                      Page {page} of {totalPages}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                      ({totalDatasets} datasets)
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    style={{
+                      padding: '8px 20px', borderRadius: '6px', border: '1px solid #232328',
+                      cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: 500,
+                      color: page >= totalPages ? '#4b5563' : '#f3f4f6',
+                      background: page >= totalPages ? '#131317' : '#1e1e24',
+                      opacity: page >= totalPages ? 0.5 : 1,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Next →
+                  </button>
                 </div>
               )}
             </div>

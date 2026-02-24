@@ -1,6 +1,6 @@
 """
 OpenCERN API — Dataset Catalog Service
-Fully async with TTL caching. No blocking I/O.
+Fully async with TTL caching and pagination. No blocking I/O.
 """
 import time
 import logging
@@ -28,7 +28,7 @@ CMS_HTTP_DATASETS = [
 _cache: dict = {}  # key → (timestamp, data)
 
 
-def _get_cached(key: str, ttl: int) -> Optional[list]:
+def _get_cached(key: str, ttl: int) -> Optional[any]:
     if key in _cache:
         ts, data = _cache[key]
         if time.time() - ts < ttl:
@@ -37,7 +37,7 @@ def _get_cached(key: str, ttl: int) -> Optional[list]:
     return None
 
 
-def _set_cached(key: str, data: list):
+def _set_cached(key: str, data):
     _cache[key] = (time.time(), data)
 
 
@@ -62,8 +62,8 @@ async def get_file_size_async(client: httpx.AsyncClient, url: str) -> int:
         return 0
 
 
-async def fetch_cms_datasets(client: httpx.AsyncClient) -> List[Dataset]:
-    """Fetch CMS datasets with async parallel size lookups."""
+async def fetch_cms_datasets(client: httpx.AsyncClient) -> dict:
+    """Fetch CMS datasets with async parallel size lookups. Returns paginated response."""
     cache_key = "cms"
     cached = _get_cached(cache_key, ttl=300)
     if cached is not None:
@@ -77,25 +77,33 @@ async def fetch_cms_datasets(client: httpx.AsyncClient) -> List[Dataset]:
         Dataset(**d, size=str(sizes[i]))
         for i, d in enumerate(CMS_HTTP_DATASETS)
     ]
-    _set_cached(cache_key, results)
-    return results
+    response = {
+        "datasets": results,
+        "total": len(results),
+        "page": 1,
+        "pages": 1,
+    }
+    _set_cached(cache_key, response)
+    return response
 
 
-async def fetch_opendata_datasets(client: httpx.AsyncClient, experiment: str) -> List[Dataset]:
-    """Fetch datasets from CERN Open Data portal with caching."""
-    cache_key = f"opendata_{experiment}"
+async def fetch_opendata_datasets(client: httpx.AsyncClient, experiment: str, page: int = 1, size: int = 20) -> dict:
+    """Fetch datasets from CERN Open Data portal with pagination and caching."""
+    cache_key = f"opendata_{experiment}_p{page}_s{size}"
     cached = _get_cached(cache_key, ttl=300)
     if cached is not None:
         return cached
 
     if experiment == "all":
-        url = "https://opendata.cern.ch/api/records/?type=Dataset&file_type=root&page=1&size=20&format=json&subtype=Collision"
+        url = f"https://opendata.cern.ch/api/records/?type=Dataset&file_type=root&page={page}&size={size}&format=json&subtype=Collision"
     else:
-        url = f"https://opendata.cern.ch/api/records/?type=Dataset&experiment={experiment}&file_type=root&page=1&size=20&format=json&subtype=Collision"
+        url = f"https://opendata.cern.ch/api/records/?type=Dataset&experiment={experiment}&file_type=root&page={page}&size={size}&format=json&subtype=Collision"
 
     resp = await client.get(url, timeout=30)
     data = resp.json()
     datasets = []
+
+    total = data.get("hits", {}).get("total", 0)
 
     for record in data.get("hits", {}).get("hits", []):
         metadata = record.get("metadata", {})
@@ -115,5 +123,14 @@ async def fetch_opendata_datasets(client: httpx.AsyncClient, experiment: str) ->
             year=int(metadata.get("date_created", ["0"])[0]) if metadata.get("date_created") else 0,
         ))
 
-    _set_cached(cache_key, datasets)
-    return datasets
+    import math
+    pages = math.ceil(total / size) if total > 0 else 1
+
+    response = {
+        "datasets": datasets,
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
+    _set_cached(cache_key, response)
+    return response
