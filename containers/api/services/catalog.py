@@ -1,182 +1,184 @@
 """
 OpenCERN API — Dataset Catalog Service
-Fully async with TTL caching. Pulls EVERY dataset from CERN OpenData.
+=======================================
+Enterprise-grade: direct CERN API proxy with per-page TTL caching.
+
+Strategy:
+  - Each user page request = ONE call to CERN OpenData API (~1s)
+  - Responses cached for 5 min → subsequent loads are instant (0ms)
+  - No pre-fetching, no waiting, no 500-request waterfall
+  - CMS featured datasets are prepended to page 1
 """
 import time
 import math
 import logging
-import asyncio
 import httpx
-from typing import List, Optional
+from typing import List
 from models import Dataset
 
 log = logging.getLogger("opencern.catalog")
 
 # ──────────────────────────────────────────────────────────────────
-# Featured CMS datasets (direct HTTP links, always available)
+# Featured CMS datasets (direct HTTP links, instant access)
 # ──────────────────────────────────────────────────────────────────
 CMS_FEATURED = [
-    {"id": "cms-001", "title": "Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "year": 2012},
-    {"id": "cms-002", "title": "Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "year": 2012},
-    {"id": "cms-003", "title": "GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "year": 2012},
-    {"id": "cms-004", "title": "VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "year": 2012},
-    {"id": "cms-005", "title": "DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "year": 2012},
-    {"id": "cms-006", "title": "TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "year": 2012},
+    {"id": "cms-001", "title": "★ Run2012B TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012B. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012B_TauPlusX.root"], "year": 2012},
+    {"id": "cms-002", "title": "★ Run2012C TauPlusX — Higgs to Tau Tau", "description": "Real CMS collision data from Run2012C. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/Run2012C_TauPlusX.root"], "year": 2012},
+    {"id": "cms-003", "title": "★ GluGluToHToTauTau — Higgs Signal MC", "description": "Simulated Higgs boson production via gluon fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/GluGluToHToTauTau.root"], "year": 2012},
+    {"id": "cms-004", "title": "★ VBF HToTauTau — Vector Boson Fusion MC", "description": "Simulated Higgs boson via vector boson fusion. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/VBF_HToTauTau.root"], "year": 2012},
+    {"id": "cms-005", "title": "★ DYJetsToLL — Drell-Yan Background", "description": "Simulated Drell-Yan process. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/DYJetsToLL.root"], "year": 2012},
+    {"id": "cms-006", "title": "★ TTbar — Top Quark Pair Production", "description": "Simulated top quark pair production. Direct HTTP download.", "files": ["https://root.cern/files/HiggsTauTauReduced/TTbar.root"], "year": 2012},
 ]
 
 # ──────────────────────────────────────────────────────────────────
-# TTL Cache
+# TTL Cache  (key → (timestamp, data))
 # ──────────────────────────────────────────────────────────────────
 _cache: dict = {}
+CACHE_TTL = 300  # 5 minutes
 
 
-def _get_cached(key: str, ttl: int = 300):
+def _get(key: str):
     if key in _cache:
-        ts, data = _cache[key]
-        if time.time() - ts < ttl:
-            return data
+        ts, val = _cache[key]
+        if time.time() - ts < CACHE_TTL:
+            return val
     return None
 
 
-def _set_cached(key: str, data):
-    _cache[key] = (time.time(), data)
+def _put(key: str, val):
+    _cache[key] = (time.time(), val)
 
 
 # ──────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────
-def _convert_xrootd_to_http(uri: str) -> str:
+def _xrd_to_http(uri: str) -> str:
     if uri.startswith("root://eospublic.cern.ch//"):
         return uri.replace("root://eospublic.cern.ch//", "https://eospublic.cern.ch/")
     return uri
 
 
 def _parse_records(records: list) -> List[Dataset]:
-    """Parse CERN OpenData API records into Dataset models.
-    Includes ALL datasets, even those without .root files."""
-    datasets = []
-    for record in records:
-        metadata = record.get("metadata", {})
-        raw_files = metadata.get("files", [])
-
-        # Collect all file URIs, converting xrootd to http where possible
-        all_files = [
-            _convert_xrootd_to_http(f.get("uri", ""))
-            for f in raw_files
-            if f.get("uri", "")
-        ]
-
-        # If no files in the record, check for doi/links
-        # Some CERN records reference files via dataset_semantics or use_with
-        if not all_files:
-            doi = metadata.get("doi", "")
-            recid = str(record.get("id", ""))
-            if recid:
-                all_files = [f"https://opendata.cern.ch/record/{recid}"]
-
-        total_size = sum(f.get("size", 0) for f in raw_files)
-
-        datasets.append(Dataset(
-            id=str(record.get("id", "")),
-            title=metadata.get("title", "Untitled Dataset"),
-            description=metadata.get("abstract", {}).get("description", "No description available."),
-            files=all_files if all_files else [f"https://opendata.cern.ch/record/{record.get('id', '')}"],
-            size=str(total_size),
-            year=int(metadata.get("date_created", ["0"])[0]) if metadata.get("date_created") else 0,
+    """Parse raw CERN API records into Dataset models."""
+    out = []
+    for r in records:
+        m = r.get("metadata", {})
+        raw_files = m.get("files", [])
+        files = [_xrd_to_http(f["uri"]) for f in raw_files if f.get("uri")]
+        if not files:
+            recid = str(r.get("id", ""))
+            files = [f"https://opendata.cern.ch/record/{recid}"]
+        out.append(Dataset(
+            id=str(r.get("id", "")),
+            title=m.get("title", "Untitled"),
+            description=m.get("abstract", {}).get("description", ""),
+            files=files,
+            size=str(sum(f.get("size", 0) for f in raw_files)),
+            year=int(m.get("date_created", ["0"])[0]) if m.get("date_created") else 0,
         ))
-    return datasets
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────
-# Core: Fetch ALL datasets for an experiment
+# Core: fetch ONE page directly from CERN API (instant)
 # ──────────────────────────────────────────────────────────────────
-async def _fetch_all_from_cern(client: httpx.AsyncClient, experiment: str, max_pages: int = 50) -> List[Dataset]:
+async def _fetch_page(client: httpx.AsyncClient, experiment: str, page: int, size: int) -> dict:
     """
-    Fetch the complete catalog by auto-paginating the CERN OpenData API.
-    No restrictive filters — pulls every dataset for the experiment.
+    Single API call to CERN OpenData → returns one page of results.
+    Cached per (experiment, page, size) for 5 minutes.
     """
-    cache_key = f"full_{experiment}"
-    cached = _get_cached(cache_key)
+    cache_key = f"{experiment}_p{page}_s{size}"
+    cached = _get(cache_key)
     if cached is not None:
-        log.info(f"Cache HIT: {experiment} ({len(cached)} datasets)")
         return cached
 
-    # NO file_type or subtype filters — get EVERYTHING
-    base = "https://opendata.cern.ch/api/records/"
-    params = f"type=Dataset&format=json&experiment={experiment}"
+    url = (
+        f"https://opendata.cern.ch/api/records/"
+        f"?type=Dataset&format=json&experiment={experiment}"
+        f"&page={page}&size={size}"
+    )
 
-    all_datasets = []
-    pg = 1
-    page_size = 100
+    t0 = time.perf_counter()
+    resp = await client.get(url, timeout=20)
+    data = resp.json()
+    elapsed = (time.perf_counter() - t0) * 1000
 
-    while pg <= max_pages:
-        url = f"{base}?{params}&page={pg}&size={page_size}"
-        log.info(f"Fetching {experiment} page {pg}...")
+    hits = data.get("hits", {})
+    total = hits.get("total", 0)
+    records = hits.get("hits", [])
+    datasets = _parse_records(records)
 
-        try:
-            resp = await client.get(url, timeout=30)
-            data = resp.json()
-        except Exception as e:
-            log.error(f"CERN API error (page {pg}): {e}")
-            break
+    result = {
+        "datasets": datasets,
+        "total": total,
+        "page": page,
+        "pages": max(1, math.ceil(total / size)),
+    }
 
-        hits = data.get("hits", {})
-        total = hits.get("total", 0)
-        records = hits.get("hits", [])
-
-        if not records:
-            break
-
-        batch = _parse_records(records)
-        all_datasets.extend(batch)
-
-        total_pages = math.ceil(total / page_size)
-        log.info(f"  → {len(batch)} datasets (page {pg}/{total_pages}, total: {total})")
-
-        if pg >= total_pages:
-            break
-        pg += 1
-        await asyncio.sleep(0.05)
-
-    log.info(f"Catalog complete: {experiment} → {len(all_datasets)} datasets")
-    _set_cached(cache_key, all_datasets)
-    return all_datasets
+    _put(cache_key, result)
+    log.info(f"{experiment} page {page} → {len(datasets)} datasets ({elapsed:.0f}ms)")
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────
-# Public API: paginated dataset responses
+# Public API
 # ──────────────────────────────────────────────────────────────────
 async def fetch_datasets(client: httpx.AsyncClient, experiment: str, page: int = 1, size: int = 20) -> dict:
     """
-    Returns a paginated slice of the full cached catalog.
-    First call fetches all pages from CERN; subsequent calls are instant.
+    Fetch datasets for any experiment with instant pagination.
+    Each page = 1 CERN API call (~1s first time, 0ms cached).
     """
-    if experiment == "CMS":
-        cern_datasets = await _fetch_all_from_cern(client, "CMS")
+    exp_map = {"Alice": "ALICE", "Atlas": "ATLAS"}
+    exp = exp_map.get(experiment, experiment)
+
+    if exp == "CMS" and page == 1:
+        # Page 1 of CMS: show featured datasets first, then fill with CERN API
         featured = [Dataset(**d, size="0") for d in CMS_FEATURED]
-        featured_titles = {d.title for d in featured}
-        all_ds = featured + [d for d in cern_datasets if d.title not in featured_titles]
-    elif experiment == "all":
-        cms_t = _fetch_all_from_cern(client, "CMS")
-        alice_t = _fetch_all_from_cern(client, "ALICE")
-        atlas_t = _fetch_all_from_cern(client, "ATLAS")
+        remaining = size - len(featured)
+        if remaining > 0:
+            cern = await _fetch_page(client, "CMS", 1, remaining)
+            result_datasets = featured + cern["datasets"]
+            total = cern["total"] + len(featured)
+        else:
+            cern = await _fetch_page(client, "CMS", 1, 1)  # just for total count
+            result_datasets = featured[:size]
+            total = cern["total"] + len(featured)
+        return {
+            "datasets": result_datasets,
+            "total": total,
+            "page": 1,
+            "pages": max(1, math.ceil(total / size)),
+        }
+
+    elif exp == "CMS" and page > 1:
+        # Page 2+ of CMS: offset by featured count, pull from CERN API
+        featured_count = len(CMS_FEATURED)
+        # Calculate the corresponding CERN API page
+        cern_offset = (page - 1) * size - featured_count
+        cern_page = max(1, math.ceil(cern_offset / size) + 1)
+        result = await _fetch_page(client, "CMS", cern_page, size)
+        result["total"] = result["total"] + featured_count
+        result["page"] = page
+        result["pages"] = max(1, math.ceil(result["total"] / size))
+        return result
+
+    elif exp == "all":
+        # Fetch page 1 of each experiment in parallel
+        import asyncio
+        cms_t = fetch_datasets(client, "CMS", page, size)
+        alice_t = _fetch_page(client, "ALICE", page, size)
+        atlas_t = _fetch_page(client, "ATLAS", page, size)
         cms, alice, atlas = await asyncio.gather(cms_t, alice_t, atlas_t)
-        featured = [Dataset(**d, size="0") for d in CMS_FEATURED]
-        featured_titles = {d.title for d in featured}
-        all_ds = featured + [d for d in cms if d.title not in featured_titles] + alice + atlas
+
+        merged = cms["datasets"] + alice["datasets"] + atlas["datasets"]
+        total = cms["total"] + alice["total"] + atlas["total"]
+        return {
+            "datasets": merged[:size],
+            "total": total,
+            "page": page,
+            "pages": max(1, math.ceil(total / size)),
+        }
+
     else:
-        exp_param = experiment if experiment != "Alice" else "ALICE"
-        all_ds = await _fetch_all_from_cern(client, exp_param)
-
-    total = len(all_ds)
-    total_pages = max(1, math.ceil(total / size))
-    page = min(page, total_pages)
-    start = (page - 1) * size
-    end = start + size
-
-    return {
-        "datasets": all_ds[start:end],
-        "total": total,
-        "page": page,
-        "pages": total_pages,
-    }
+        # ALICE, ATLAS, or any other experiment — direct proxy
+        return await _fetch_page(client, exp, page, size)
