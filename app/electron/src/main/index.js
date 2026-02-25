@@ -109,6 +109,7 @@ if (!gotTheLock) {
 
     const env = {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',  // Critical: makes Electron binary act as Node.js
       PORT: '3000',
       HOSTNAME: '127.0.0.1',
       NODE_ENV: 'production',
