@@ -1,0 +1,22 @@
+# Quantum computing dependencies for OpenCERN
+# These are installed inside the quantum Docker container
+
+# Core quantum SDK
+qiskit>=1.0.0
+qiskit-aer>=0.13.0
+qiskit-machine-learning>=0.7.0
+
+# IBM Quantum (real hardware)
+qiskit-ibm-runtime>=0.20.0
+
+# Amazon Braket (optional)
+amazon-braket-sdk>=1.70.0
+
+# REST API
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+# Data handling
+numpy>=1.26.0
+scikit-learn>=1.4.0
+pandas>=2.2.0
