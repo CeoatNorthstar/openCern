@@ -1,6 +1,21 @@
 version: "3.9"
 
 services:
+  frontend:
+    build:
+      context: ./app/next-ui
+      dockerfile: Dockerfile
+    container_name: opencern-frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
   api:
     build:
       context: .
@@ -46,3 +61,4 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+
