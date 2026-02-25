@@ -5,11 +5,15 @@ const ipcMain = electron.ipcMain
 const shell = electron.shell
 const dialog = electron.dialog
 const path = require('path')
+const fs = require('fs')
 const { exec, spawn } = require('child_process')
 const http = require('http')
 
 let win;
 let nextServer; // Child process for Next.js standalone server
+
+// Full PATH for finding Docker on macOS (Homebrew, system, Docker Desktop)
+const DOCKER_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin';
 
 process.on('uncaughtException', (err) => {
   console.error("FATAL UNCAUGHT:", err);
@@ -30,11 +34,9 @@ if (!gotTheLock) {
     app.setAsDefaultProtocolClient('opencern')
   }
   app.on('second-instance', (event, commandLine, workingDirectory) => {
-    // Windows/Linux deep link handler
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
-      
       const url = commandLine.pop()
       if (url.startsWith('opencern://')) {
         win.webContents.send('sso-auth-callback', url)
@@ -42,11 +44,38 @@ if (!gotTheLock) {
     }
   })
 
+  // ── Docker helpers ──
+
   async function checkDocker() {
     return new Promise((resolve) => {
-      exec('docker info', { env: { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' } }, (error) => resolve(!error));
+      exec('docker info', { env: { ...process.env, PATH: DOCKER_PATH } }, (error) => resolve(!error));
     });
   }
+
+  function dockerExec(command, cwd) {
+    /**
+     * Run a docker compose command, always using -p opencern for a consistent
+     * project name regardless of where the compose file lives.
+     */
+    return new Promise((resolve) => {
+      const fullCmd = `docker compose -p opencern ${command}`;
+      console.log(`[Docker] Running: ${fullCmd}`);
+      console.log(`[Docker] CWD: ${cwd}`);
+      
+      exec(fullCmd, {
+        cwd,
+        env: { ...process.env, PATH: DOCKER_PATH },
+        timeout: 300000, // 5 minute timeout for builds
+      }, (err, stdout, stderr) => {
+        if (stdout) console.log(`[Docker] stdout: ${stdout.trim()}`);
+        if (stderr) console.log(`[Docker] stderr: ${stderr.trim()}`);
+        if (err) console.error(`[Docker] Error: ${err.message}`);
+        resolve({ err, stdout, stderr });
+      });
+    });
+  }
+
+  // ── Splash Screen ──
 
   function showLoadingWindow() {
     const loadWin = new BrowserWindow({
@@ -66,7 +95,7 @@ if (!gotTheLock) {
             <source src="${videoUrl}" type="video/mp4">
         </video>
         <div style="position: absolute; bottom: 20px; display: flex; flex-direction: column; align-items: center;">
-            <p style="color:#9ca3af; font-size:13px; margin-bottom:8px; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">Starting isolated physics environments...</p>
+            <p id="status" style="color:#9ca3af; font-size:13px; margin-bottom:8px; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">Starting isolated physics environments...</p>
             <div style="width:20px; height:20px; border:2px solid #1f2937; border-top:2px solid #3b82f6; border-radius:50%; animation: spin 1s linear infinite;"></div>
         </div>
         <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
@@ -76,7 +105,9 @@ if (!gotTheLock) {
     return loadWin;
   }
 
-  async function pollPort(port, timeoutMs=30000) {
+  // ── Port polling ──
+
+  async function pollPort(port, timeoutMs = 60000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       try {
@@ -89,29 +120,38 @@ if (!gotTheLock) {
         });
         if (ok) return true;
       } catch(e) {}
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1000));
     }
     return false;
   }
 
+  // ── Next.js standalone server ──
+
   function startNextServer() {
     if (!app.isPackaged) {
-      // In dev mode, Next.js dev server is started separately via `npm run dev`
       console.log("Dev mode — skipping Next.js server start (use `npm run dev` in next-ui)");
       return null;
     }
 
-    // In packaged mode, spawn the standalone Next.js server
     const standaloneDir = path.join(process.resourcesPath, 'next-standalone');
     const serverScript = path.join(standaloneDir, 'server.js');
     
-    console.log("Starting Next.js standalone server from:", standaloneDir);
+    // Verify the server script exists
+    if (!fs.existsSync(serverScript)) {
+      console.error("FATAL: Next.js server.js not found at:", serverScript);
+      console.error("Contents of standalone dir:", fs.readdirSync(standaloneDir).join(', '));
+      return null;
+    }
+
+    console.log("Starting Next.js standalone server...");
+    console.log("  Script:", serverScript);
+    console.log("  CWD:", standaloneDir);
 
     const env = {
       ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',  // Critical: makes Electron binary act as Node.js
+      ELECTRON_RUN_AS_NODE: '1',
       PORT: '3000',
-      HOSTNAME: '127.0.0.1',
+      HOSTNAME: '0.0.0.0',
       NODE_ENV: 'production',
     };
 
@@ -125,17 +165,19 @@ if (!gotTheLock) {
       console.log(`[Next.js] ${data.toString().trim()}`);
     });
     child.stderr.on('data', (data) => {
-      console.error(`[Next.js] ${data.toString().trim()}`);
+      console.error(`[Next.js ERR] ${data.toString().trim()}`);
     });
     child.on('error', (err) => {
-      console.error("Next.js server failed to start:", err);
+      console.error("Next.js server process error:", err);
     });
-    child.on('exit', (code) => {
-      console.log(`Next.js server exited with code ${code}`);
+    child.on('exit', (code, signal) => {
+      console.log(`Next.js server exited: code=${code} signal=${signal}`);
     });
 
     return child;
   }
+
+  // ── Main Window ──
 
   async function createWindow() {
     win = new BrowserWindow({
@@ -143,75 +185,100 @@ if (!gotTheLock) {
       height: 900,
       titleBarStyle: 'hiddenInset',
       backgroundColor: '#080b14',
-      show: false, // hide initially securely
+      show: false,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false, 
       },
     })
 
-    console.log("Checking for Docker presence...");
+    // 1. Check Docker
+    console.log("=== OpenCERN Startup ===");
+    console.log("Packaged:", app.isPackaged);
+    if (app.isPackaged) {
+      console.log("Resources:", process.resourcesPath);
+    }
+
+    console.log("Step 1: Checking Docker...");
     const hasDocker = await checkDocker();
-    console.log("Docker presence resolved:", hasDocker);
+    console.log("Docker available:", hasDocker);
     if (!hasDocker) {
-      dialog.showErrorBox("Docker Required", "OpenCERN requires Docker Desktop to containerize its physics simulation backends. Please install and launch Docker Desktop to proceed.");
+      dialog.showErrorBox("Docker Required", "OpenCERN requires Docker Desktop. Please install and launch Docker Desktop, then restart OpenCERN.");
       app.quit();
       return;
     }
 
+    // 2. Show splash
     const loadWin = showLoadingWindow();
     const splashStartTime = Date.now();
 
-    const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
-    
-    const env = { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' };
-    
-    // Ensure the intro video finishes playing before booting Docker
-    console.log("Waiting for video to finish prior to Docker boot...");
+    // 3. Wait for splash video
+    console.log("Step 2: Playing startup video...");
     const elapsedVideo = Date.now() - splashStartTime;
     if (elapsedVideo < 6000) {
-        await new Promise(r => setTimeout(r, 6000 - elapsedVideo));
+      await new Promise(r => setTimeout(r, 6000 - elapsedVideo));
     }
 
-    // Start the Next.js standalone server (production only)
-    console.log("Starting Next.js frontend server...");
+    // 4. Start Next.js server (packaged only)
+    console.log("Step 3: Starting Next.js frontend...");
     nextServer = startNextServer();
 
-    console.log("Building and Starting Containers...");
-    await new Promise((resolve) => {
-      exec('docker compose up -d --build', { cwd: composePath, env }, (err, stdout, stderr) => {
-        if (err && !app.isPackaged) {
-            console.warn("Docker compose up warning:", err);
-        }
-        resolve();
-      });
-    });
-
-    // Wait for API backend (port 8080)
-    console.log("Waiting for API backend (port 8080)...");
-    const isApiHealthy = await pollPort(8080, 30000);
-    console.log("API backend ready:", isApiHealthy);
-    if (!isApiHealthy) {
-       loadWin.close();
-       dialog.showErrorBox("Backend Timeout", "The physics microservices failed to boot within 30 seconds. Please check Docker or restart OpenCERN.");
-       app.exit(1);
-       return;
+    // 5. Start Docker containers
+    //    In packaged mode: just `up -d` (no --build) using pre-built images
+    //    In dev mode: `up -d --build` to rebuild from source
+    console.log("Step 4: Starting Docker containers...");
+    const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
+    
+    if (app.isPackaged) {
+      // For packaged app, just start containers (don't rebuild)
+      // Images should already exist from dev builds
+      await dockerExec('up -d', composePath);
+    } else {
+      await dockerExec('up -d --build', composePath);
     }
 
-    // Wait for Next.js frontend (port 3000)
-    console.log("Waiting for Next.js frontend (port 3000)...");
-    const isFrontendReady = await pollPort(3000, 15000);
+    // 6. Wait for API backend
+    console.log("Step 5: Waiting for API (port 8080)...");
+    const isApiHealthy = await pollPort(8080, 60000);
+    console.log("API ready:", isApiHealthy);
+    if (!isApiHealthy) {
+      loadWin.close();
+      dialog.showErrorBox(
+        "Backend Timeout",
+        "Docker containers failed to start within 60 seconds.\n\n" +
+        "Make sure the OpenCERN containers are built:\n" +
+        "  1. Open Terminal\n" +
+        "  2. cd to the opencern project\n" +
+        "  3. Run: docker compose up -d --build\n\n" +
+        "Then restart OpenCERN."
+      );
+      app.exit(1);
+      return;
+    }
+
+    // 7. Wait for Next.js frontend
+    console.log("Step 6: Waiting for frontend (port 3000)...");
+    const isFrontendReady = await pollPort(3000, 30000);
     console.log("Frontend ready:", isFrontendReady);
     if (!isFrontendReady) {
-       loadWin.close();
-       dialog.showErrorBox("Frontend Timeout", "The Next.js frontend failed to start within 15 seconds. Please restart OpenCERN.");
-       app.exit(1);
-       return;
+      loadWin.close();
+      dialog.showErrorBox(
+        "Frontend Timeout",
+        "The Next.js frontend failed to start within 30 seconds.\n\n" +
+        "Please restart OpenCERN. If this persists, run the app\n" +
+        "from Terminal to see logs:\n" +
+        "  /Applications/OpenCERN.app/Contents/MacOS/OpenCERN"
+      );
+      app.exit(1);
+      return;
     }
 
+    // 8. Show main window
+    console.log("Step 7: Loading main window...");
     loadWin.close();
     win.show();
     win.loadURL('http://localhost:3000')
+    console.log("=== OpenCERN Ready ===");
   }
 
   app.whenReady().then(createWindow)
@@ -224,7 +291,6 @@ if (!gotTheLock) {
       win.focus()
       win.webContents.send('sso-auth-callback', url)
     } else {
-      // If the app was closed and opened via deep link
       app.whenReady().then(() => {
         createWindow();
         win.webContents.once('did-finish-load', () => {
@@ -238,22 +304,25 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  // Ensure Docker cleanly spins down background tasks when exiting OpenCERN
+  // Clean shutdown
   app.on('before-quit', (e) => {
     if (!app.isQuiting) {
       e.preventDefault();
       const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
-      console.log("Shutting down local physics containers...");
-      const env = { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' };
+      console.log("Shutting down...");
 
-      // Kill the Next.js server
+      // Kill Next.js server
       if (nextServer) {
         console.log("Stopping Next.js server...");
         nextServer.kill('SIGTERM');
         nextServer = null;
       }
 
-      exec('docker compose stop', { cwd: composePath, env }, () => {
+      // Stop Docker containers
+      exec(`docker compose -p opencern stop`, {
+        cwd: composePath,
+        env: { ...process.env, PATH: DOCKER_PATH },
+      }, () => {
         app.isQuiting = true;
         app.exit(0);
       });
