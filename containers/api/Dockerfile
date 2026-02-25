@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     make \
     python3-pip \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Build the C++ processor ──

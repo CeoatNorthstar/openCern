@@ -1,11 +1,13 @@
 """
 OpenCERN API — Processing Router
-Supports experiment-aware processing with selective file processing.
+Supports experiment-aware processing with selective file processing,
+folder-level batch processing, and multi-file JSON merging.
 """
 import os
 import json
 import logging
 import subprocess
+import glob
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import List, Optional
@@ -62,6 +64,132 @@ def run_processor(filepath: str, track_key: str, experiment: str = "auto"):
         log.error(f"Processing exception: {track_key} — {e}")
 
 
+def run_folder_processor(folder_name: str, experiment: str = "auto"):
+    """
+    Process all ROOT files in a dataset folder.
+    Each file is processed individually, then results are merged into
+    a single {folder_name}.json with combined events sorted by HT.
+    """
+    folder_path = os.path.join(DATA_DIR, folder_name)
+    root_files = sorted(glob.glob(os.path.join(folder_path, "*.root")))
+
+    if not root_files:
+        process_status[folder_name] = "error"
+        log.error(f"No ROOT files found in {folder_path}")
+        return
+
+    total_files = len(root_files)
+    log.info(f"Folder processing: {folder_name} — {total_files} ROOT file(s)")
+    process_status[folder_name] = f"processing 0/{total_files}"
+
+    all_events = []
+    all_metadata = []
+    errors = []
+
+    for idx, root_file in enumerate(root_files):
+        basename = os.path.basename(root_file)
+        process_status[folder_name] = f"processing {idx + 1}/{total_files}: {basename}"
+        log.info(f"  [{idx + 1}/{total_files}] Processing {basename}...")
+
+        # Run C++ processor on this file
+        cmd = [
+            "opencern-processor",
+            root_file,
+            "--experiment", experiment,
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=600
+            )
+
+            if result.stderr:
+                for line in result.stderr.strip().split('\n'):
+                    log.info(f"    [C++] {line}")
+
+            if result.returncode == 0:
+                # Read the individual output JSON
+                stem = os.path.splitext(basename)[0]
+                output_json = os.path.join(PROCESSED_DIR, f"{stem}.json")
+
+                if os.path.exists(output_json):
+                    with open(output_json, "r") as f:
+                        data = json.load(f)
+
+                    all_events.extend(data.get("events", []))
+                    all_metadata.append(data.get("metadata", {}))
+                    log.info(f"    ✓ {stem}: {len(data.get('events', []))} events")
+
+                    # Remove individual output (we'll create merged)
+                    os.remove(output_json)
+                else:
+                    errors.append(f"{basename}: no output JSON")
+            else:
+                errors.append(f"{basename}: exit code {result.returncode}")
+                log.error(f"    ✗ {basename}: exit code {result.returncode}")
+
+        except subprocess.TimeoutExpired:
+            errors.append(f"{basename}: timeout")
+            log.error(f"    ✗ {basename}: timed out")
+        except Exception as e:
+            errors.append(f"{basename}: {str(e)}")
+            log.error(f"    ✗ {basename}: {e}")
+
+    if not all_events:
+        process_status[folder_name] = "error"
+        log.error(f"Folder processing failed: no events extracted from {folder_name}")
+        return
+
+    # ── Merge results ──
+    process_status[folder_name] = "merging"
+    log.info(f"Merging {len(all_events)} events from {len(all_metadata)} file(s)...")
+
+    # Sort by HT descending
+    all_events.sort(key=lambda e: e.get("ht", 0), reverse=True)
+
+    # Cap at 5000 events
+    max_events = 5000
+    if len(all_events) > max_events:
+        all_events = all_events[:max_events]
+
+    # Combine metadata
+    total_scanned = sum(m.get("total_scanned", 0) for m in all_metadata)
+    all_ptypes = set()
+    for m in all_metadata:
+        all_ptypes.update(m.get("particle_types", []))
+
+    total_particles = sum(len(e.get("particles", [])) for e in all_events)
+
+    merged_metadata = {
+        "source_files": [m.get("source_file", "") for m in all_metadata],
+        "experiment": all_metadata[0].get("experiment", "AUTO") if all_metadata else "AUTO",
+        "total_files": total_files,
+        "total_scanned": total_scanned,
+        "filtered_events": len(all_events),
+        "processor": "C++ (native ROOT) — merged",
+        "particle_types": sorted(all_ptypes),
+        "avg_particles_per_event": round(total_particles / max(len(all_events), 1), 2),
+        "errors": errors if errors else None,
+    }
+
+    merged_output = {
+        "metadata": merged_metadata,
+        "events": all_events,
+    }
+
+    # Write merged output
+    merged_path = os.path.join(PROCESSED_DIR, f"{folder_name}.json")
+    with open(merged_path, "w") as f:
+        json.dump(merged_output, f, separators=(",", ":"))
+
+    size_mb = os.path.getsize(merged_path) / (1024 * 1024)
+    process_status[folder_name] = "processed"
+    log.info(f"Folder processing complete: {folder_name}")
+    log.info(f"  Files: {total_files} ({len(errors)} errors)")
+    log.info(f"  Events: {len(all_events)} (merged)")
+    log.info(f"  Output: {merged_path} ({size_mb:.1f} MB)")
+
+
 @router.post("/process")
 async def process_file(filename: str, background_tasks: BackgroundTasks,
                        experiment: str = "auto"):
@@ -93,6 +221,33 @@ async def process_batch(req: ProcessRequest, background_tasks: BackgroundTasks):
         "message": f"Processing {len(results)} files",
         "experiment": req.experiment,
         "files": results,
+    }
+
+
+@router.post("/process/folder")
+async def process_folder(folder: str, background_tasks: BackgroundTasks,
+                         experiment: str = "auto"):
+    """
+    Process all ROOT files in a dataset folder and merge into single output.
+    This is the enterprise-level handler for ATLAS zip archives and
+    other multi-file datasets.
+    """
+    folder_path = os.path.join(DATA_DIR, folder)
+    if not os.path.isdir(folder_path):
+        return {"error": f"Folder not found: {folder}"}
+
+    root_files = glob.glob(os.path.join(folder_path, "*.root"))
+    if not root_files:
+        return {"error": f"No ROOT files in {folder}"}
+
+    process_status[folder] = f"processing 0/{len(root_files)}"
+    background_tasks.add_task(run_folder_processor, folder, experiment)
+
+    return {
+        "message": f"Processing {len(root_files)} ROOT files in {folder}/",
+        "status": "processing",
+        "total_files": len(root_files),
+        "experiment": experiment,
     }
 
 
@@ -130,3 +285,4 @@ async def delete_processed_data(filename: str):
         os.remove(output_file)
         return {"message": f"{stem}.json deleted"}
     return {"error": "File not found"}
+

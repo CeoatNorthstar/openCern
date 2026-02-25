@@ -297,11 +297,19 @@ export default function App() {
   const processFile = async (filename) => {
     setProcessing(prev => ({ ...prev, [filename]: 'processing' }));
     try {
-      await axios.post(`http://localhost:8080/process?filename=${filename}`);
+      // Detect if this is a folder (dataset with multiple ROOT files)
+      const fileEntry = downloaded.find(f => f.filename === filename);
+      const isFolder = fileEntry && fileEntry.type === 'folder';
+
+      if (isFolder) {
+        await axios.post(`http://localhost:8080/process/folder?folder=${encodeURIComponent(filename)}`);
+      } else {
+        await axios.post(`http://localhost:8080/process?filename=${encodeURIComponent(filename)}`);
+      }
       
       const interval = setInterval(async () => {
         try {
-          const res = await axios.get(`http://localhost:8080/process/status?filename=${filename}`);
+          const res = await axios.get(`http://localhost:8080/process/status?filename=${encodeURIComponent(filename)}`);
           const status = res.data.status;
           setProcessing(prev => ({ ...prev, [filename]: status }));
           if (status === 'processed' || status === 'error') {
@@ -1001,27 +1009,27 @@ export default function App() {
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <button
                                 onClick={() => (pStatus === 'idle' || pStatus === 'error') ? processFile(f.filename) : null}
-                                disabled={pStatus === 'processing' || pStatus === 'processed'}
+                                disabled={pStatus === 'processing' || pStatus === 'processed' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting'}
                                 style={{ 
                                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                                   background: pStatus === 'processed' ? '#059669' : 
                                               pStatus === 'error' ? '#dc2626' : 
-                                              pStatus === 'processing' ? '#3b82f6' : 'transparent',
+                                              (pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting') ? '#3b82f6' : 'transparent',
                                   border: `1px solid ${pStatus === 'idle' ? '#374151' : 'transparent'}`,
                                   color: pStatus === 'idle' ? '#d1d5db' : '#ffffff', 
                                   padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                                  cursor: (pStatus === 'processing' || pStatus === 'processed') ? 'not-allowed' : 'pointer',
+                                  cursor: (pStatus === 'processing' || pStatus === 'processed' || pStatus.startsWith?.('processing ') || pStatus === 'merging') ? 'not-allowed' : 'pointer',
                                   transition: 'all 0.15s ease',
-                                  opacity: pStatus === 'processing' ? 0.8 : 1
+                                  opacity: (pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging') ? 0.8 : 1
                                 }}
                               >
-                                {pStatus === 'processing' ? (
+                                {(pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting') ? (
                                   <>
                                     <svg className="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                        <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
                                        <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff"></path>
                                     </svg>
-                                    PROCESSING
+                                    {pStatus === 'merging' ? 'MERGING' : pStatus === 'extracting' ? 'EXTRACTING' : pStatus.startsWith?.('processing ') ? pStatus.split(':')[0].toUpperCase() : 'PROCESSING'}
                                   </>
                                 ) : pStatus === 'processed' ? (
                                   <>
@@ -1033,7 +1041,7 @@ export default function App() {
                                   </>
                                 ) : (
                                   <>
-                                    <IconCpu /> PROCESS
+                                    <IconCpu /> {f.type === 'folder' ? 'PROCESS ALL' : 'PROCESS'}
                                   </>
                                 )}
                               </button>

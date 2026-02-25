@@ -1,13 +1,14 @@
 """
 OpenCERN API — Async Download Engine
 Fully non-blocking with httpx streaming, resumable downloads, progress tracking,
-and subfolder support for multi-file datasets.
+subfolder support for multi-file datasets, and auto-archive extraction.
 """
 import os
 import logging
 import httpx
 from models import DownloadStatus
 from config import DATA_DIR, DOWNLOAD_CHUNK_SIZE, DOWNLOAD_TIMEOUT
+from services.archive_handler import is_archive, extract_archive
 
 log = logging.getLogger("opencern.downloader")
 
@@ -34,6 +35,7 @@ async def download_file_async(file_url: str, filename: str, subfolder: str = Non
     """
     Stream-download a file with progress tracking and cancellation.
     If subfolder is set, downloads into DATA_DIR/subfolder/filename.
+    After download, auto-detects and extracts archives (zip/tar.gz).
     """
     if subfolder:
         dest_dir = os.path.join(DATA_DIR, subfolder)
@@ -72,6 +74,16 @@ async def download_file_async(file_url: str, filename: str, subfolder: str = Non
                     if total_size > 0 and track_key in download_status:
                         download_status[track_key].progress = round((downloaded / total_size) * 100, 1)
 
+        # ── Post-download: auto-extract archives ──
+        if is_archive(filepath):
+            log.info(f"Archive detected: {track_key} — extracting ROOT files...")
+            if track_key in download_status:
+                download_status[track_key].status = "extracting"
+
+            extract_dest = dest_dir if subfolder else DATA_DIR
+            extracted = extract_archive(filepath, extract_dest)
+            log.info(f"Extraction complete: {len(extracted)} ROOT file(s)")
+
         if track_key in download_status:
             download_status[track_key].status = "done"
             download_status[track_key].progress = 100.0
@@ -81,3 +93,4 @@ async def download_file_async(file_url: str, filename: str, subfolder: str = Non
         log.error(f"Download failed: {track_key} — {e}")
         if track_key in download_status:
             download_status[track_key].status = "error"
+
