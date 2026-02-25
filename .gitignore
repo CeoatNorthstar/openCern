@@ -24,3 +24,6 @@ app/electron/media/videos/
 containers/streaming/target/
 __pycache__/
 *.pyc
+
+# Electron build output
+per-nothing/
