@@ -23,26 +23,43 @@ class ProcessRequest(BaseModel):
 
 
 def run_processor(filepath: str, track_key: str, experiment: str = "auto"):
-    """Spawn the data-processor container ephemerally via Docker socket."""
-    container_filepath = f"/home/appuser/opencern-datasets/data/{filepath}"
-    log.info(f"Spawning processor for {track_key} (experiment={experiment})")
+    """Run the C++ data processor binary directly (embedded in API container)."""
+    full_path = os.path.join(DATA_DIR, filepath)
+    log.info(f"Running C++ processor for {track_key} (experiment={experiment})")
 
     cmd = [
-        "docker", "run", "--rm",
-        "--volumes-from", "opencern-api",
         "opencern-processor",
-        container_filepath,
+        full_path,
         "--experiment", experiment,
     ]
 
-    result = subprocess.run(cmd)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600
+        )
 
-    if result.returncode == 0:
-        process_status[track_key] = "processed"
-        log.info(f"Processing complete: {track_key}")
-    else:
+        # Log processor output
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                log.info(f"  [C++] {line}")
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                log.info(f"  [C++] {line}")
+
+        if result.returncode == 0:
+            process_status[track_key] = "processed"
+            log.info(f"Processing complete: {track_key}")
+        else:
+            process_status[track_key] = "error"
+            log.error(f"Processing failed: {track_key} (exit code {result.returncode})")
+            if result.stderr:
+                log.error(f"  stderr: {result.stderr[:500]}")
+    except subprocess.TimeoutExpired:
         process_status[track_key] = "error"
-        log.error(f"Processing failed: {track_key} (exit code {result.returncode})")
+        log.error(f"Processing timed out: {track_key} (>600s)")
+    except Exception as e:
+        process_status[track_key] = "error"
+        log.error(f"Processing exception: {track_key} — {e}")
 
 
 @router.post("/process")
