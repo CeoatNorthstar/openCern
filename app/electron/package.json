@@ -6,10 +6,11 @@
   "main": "src/main/index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix ../next-ui\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron .\"",
-    "build": "npm run build --prefix ../next-ui && electron-builder",
-    "build:mac": "npm run build --prefix ../next-ui && electron-builder --mac",
-    "build:win": "npm run build --prefix ../next-ui && electron-builder --win",
-    "build:all": "npm run build --prefix ../next-ui && electron-builder --mac --win"
+    "prepare-standalone": "npm run build --prefix ../next-ui && cp -r ../next-ui/.next/static ../next-ui/.next/standalone/.next/static && cp -r ../next-ui/public ../next-ui/.next/standalone/public",
+    "build": "npm run prepare-standalone && electron-builder",
+    "build:mac": "npm run prepare-standalone && electron-builder --mac",
+    "build:win": "npm run prepare-standalone && electron-builder --win",
+    "build:all": "npm run prepare-standalone && electron-builder --mac --win"
   },
   "build": {
     "appId": "com.northstars.opencern",
@@ -38,6 +39,11 @@
         "from": "../../containers/",
         "to": "containers/",
         "filter": ["**/*", "!**/node_modules/**", "!**/__pycache__/**", "!**/venv/**", "!**/target/**", "!**/.cache/**", "!**/*.pyc"]
+      },
+      {
+        "from": "../next-ui/.next/standalone/",
+        "to": "next-standalone/",
+        "filter": ["**/*"]
       }
     ],
     "mac": {

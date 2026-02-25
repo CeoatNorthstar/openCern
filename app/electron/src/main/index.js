@@ -5,10 +5,11 @@ const ipcMain = electron.ipcMain
 const shell = electron.shell
 const dialog = electron.dialog
 const path = require('path')
-const { exec } = require('child_process')
+const { exec, spawn } = require('child_process')
 const http = require('http')
 
 let win;
+let nextServer; // Child process for Next.js standalone server
 
 process.on('uncaughtException', (err) => {
   console.error("FATAL UNCAUGHT:", err);
@@ -53,9 +54,6 @@ if (!gotTheLock) {
       webPreferences: { nodeIntegration: true, webSecurity: false }
     });
     
-    // We must load an actual local HTML file or construct a data URI 
-    // that has the correct privileges to load local file:// resources.
-    // The safest way is to use a Data URL but encode the video as absolute path.
     const videoPath = app.isPackaged 
         ? path.join(process.resourcesPath, 'media/videos/startup_video/720p30/StartupLogo.mp4')
         : path.join(__dirname, '../../../../app/electron/media/videos/startup_video/720p30/StartupLogo.mp4');
@@ -78,21 +76,64 @@ if (!gotTheLock) {
     return loadWin;
   }
 
-  async function pollHealth(timeoutMs=30000) {
+  async function pollPort(port, timeoutMs=30000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       try {
         const ok = await new Promise((resolve) => {
-          const req = http.get('http://127.0.0.1:8080/health', (res) => {
-            resolve(res.statusCode === 200);
+          const req = http.get(`http://127.0.0.1:${port}`, (res) => {
+            resolve(res.statusCode >= 200 && res.statusCode < 500);
           });
           req.on('error', () => resolve(false));
+          req.setTimeout(2000, () => { req.destroy(); resolve(false); });
         });
         if (ok) return true;
       } catch(e) {}
       await new Promise(r => setTimeout(r, 500));
     }
     return false;
+  }
+
+  function startNextServer() {
+    if (!app.isPackaged) {
+      // In dev mode, Next.js dev server is started separately via `npm run dev`
+      console.log("Dev mode — skipping Next.js server start (use `npm run dev` in next-ui)");
+      return null;
+    }
+
+    // In packaged mode, spawn the standalone Next.js server
+    const standaloneDir = path.join(process.resourcesPath, 'next-standalone');
+    const serverScript = path.join(standaloneDir, 'server.js');
+    
+    console.log("Starting Next.js standalone server from:", standaloneDir);
+
+    const env = {
+      ...process.env,
+      PORT: '3000',
+      HOSTNAME: '127.0.0.1',
+      NODE_ENV: 'production',
+    };
+
+    const child = spawn(process.execPath, [serverScript], {
+      cwd: standaloneDir,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    child.stdout.on('data', (data) => {
+      console.log(`[Next.js] ${data.toString().trim()}`);
+    });
+    child.stderr.on('data', (data) => {
+      console.error(`[Next.js] ${data.toString().trim()}`);
+    });
+    child.on('error', (err) => {
+      console.error("Next.js server failed to start:", err);
+    });
+    child.on('exit', (code) => {
+      console.log(`Next.js server exited with code ${code}`);
+    });
+
+    return child;
   }
 
   async function createWindow() {
@@ -131,6 +172,10 @@ if (!gotTheLock) {
         await new Promise(r => setTimeout(r, 6000 - elapsedVideo));
     }
 
+    // Start the Next.js standalone server (production only)
+    console.log("Starting Next.js frontend server...");
+    nextServer = startNextServer();
+
     console.log("Building and Starting Containers...");
     await new Promise((resolve) => {
       exec('docker compose up -d --build', { cwd: composePath, env }, (err, stdout, stderr) => {
@@ -141,13 +186,24 @@ if (!gotTheLock) {
       });
     });
 
-    console.log("Entering healthcheck polling loop...");
-    // Block the renderer URL from loading until the Python FastAPI healthcheck succeeds
-    const isHealthy = await pollHealth();
-    console.log("Healthcheck loop unblocked. isHealthy:", isHealthy);
-    if (!isHealthy) {
+    // Wait for API backend (port 8080)
+    console.log("Waiting for API backend (port 8080)...");
+    const isApiHealthy = await pollPort(8080, 30000);
+    console.log("API backend ready:", isApiHealthy);
+    if (!isApiHealthy) {
        loadWin.close();
        dialog.showErrorBox("Backend Timeout", "The physics microservices failed to boot within 30 seconds. Please check Docker or restart OpenCERN.");
+       app.exit(1);
+       return;
+    }
+
+    // Wait for Next.js frontend (port 3000)
+    console.log("Waiting for Next.js frontend (port 3000)...");
+    const isFrontendReady = await pollPort(3000, 15000);
+    console.log("Frontend ready:", isFrontendReady);
+    if (!isFrontendReady) {
+       loadWin.close();
+       dialog.showErrorBox("Frontend Timeout", "The Next.js frontend failed to start within 15 seconds. Please restart OpenCERN.");
        app.exit(1);
        return;
     }
@@ -188,6 +244,14 @@ if (!gotTheLock) {
       const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
       console.log("Shutting down local physics containers...");
       const env = { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' };
+
+      // Kill the Next.js server
+      if (nextServer) {
+        console.log("Stopping Next.js server...");
+        nextServer.kill('SIGTERM');
+        nextServer = null;
+      }
+
       exec('docker compose stop', { cwd: composePath, env }, () => {
         app.isQuiting = true;
         app.exit(0);
