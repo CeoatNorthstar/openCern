@@ -5,7 +5,7 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CLAUDE_TOKEN_URL = 'https://claude.ai/oauth/token';
+const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'; // Bypass Cloudflare on claude.ai
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Official Claude Code client_id
 
 export async function POST(request) {
