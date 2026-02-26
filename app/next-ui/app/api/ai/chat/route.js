@@ -7,11 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { messages, systemPrompt, model, apiKey, oauthToken } = await request.json();
+    const { messages, systemPrompt, model, apiKey } = await request.json();
 
-    if (!apiKey && !oauthToken) {
+    if (!apiKey) {
       return Response.json(
-        { error: 'No authentication provided. Add an API key or connect your account.' },
+        { error: 'No API key provided. Add an API key in settings.' },
         { status: 400 }
       );
     }
@@ -30,12 +30,8 @@ export async function POST(request) {
     const headers = {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
+      'x-api-key': apiKey
     };
-    if (oauthToken) {
-      headers['Authorization'] = `Bearer ${oauthToken}`;
-    } else {
-      headers['x-api-key'] = apiKey;
-    }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
