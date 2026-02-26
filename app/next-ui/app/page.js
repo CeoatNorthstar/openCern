@@ -190,7 +190,7 @@ const AI_SUGGESTIONS = [
 ];
 
 // OAuth PKCE helpers
-const CLAUDE_CLIENT_ID = '9d1d2e07-b4c2-49b2-8e0e-c27002455657';
+const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_AUTH_URL = 'https://claude.ai/oauth/authorize';
 
 function generateCodeVerifier() {
@@ -314,6 +314,7 @@ export default function App() {
   const [aiSettingsTab, setAiSettingsTab] = useState('apikey');
   const [aiOAuthStep, setAiOAuthStep] = useState('init');
   const [aiOAuthCode, setAiOAuthCode] = useState('');
+  const [aiOAuthUrl, setAiOAuthUrl] = useState('');
   const [aiOAuthLoading, setAiOAuthLoading] = useState(false);
   const aiMessagesEndRef = useRef(null);
   const aiAbortRef = useRef(null);
@@ -378,30 +379,37 @@ export default function App() {
 
   const isAiAuthed = aiConfig.authMode === 'oauth' ? !!aiConfig.oauthToken : !!aiConfig.apiKey;
 
-  const startOAuth = useCallback(async () => {
-    const verifier = generateCodeVerifier();
-    oauthVerifierRef.current = verifier;
-    localStorage.setItem('opencern-oauth-verifier', verifier);
-
-    const challenge = await generateCodeChallenge(verifier);
-    // Use the exact redirect URI expected by the Claude Code client_id
-    const redirectUri = `http://localhost:54545/callback`;
-    const state = crypto.randomUUID();
-
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: CLAUDE_CLIENT_ID,
-      redirect_uri: redirectUri,
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      scope: 'user:inference',
-      state,
-    });
-
-    window.open(`${CLAUDE_AUTH_URL}?${params}`, '_blank', 'width=600,height=700');
+  const startOAuth = useCallback(() => {
     setAiOAuthStep('paste');
     setAiError('');
   }, []);
+
+  useEffect(() => {
+    if (aiSettingsTab !== 'oauth' || aiOAuthStep !== 'init') return;
+    let valid = true;
+    (async () => {
+      const verifier = generateCodeVerifier();
+      oauthVerifierRef.current = verifier;
+      localStorage.setItem('opencern-oauth-verifier', verifier);
+
+      const challenge = await generateCodeChallenge(verifier);
+      const redirectUri = `http://localhost:54545/callback`;
+      const state = crypto.randomUUID();
+
+      const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: CLAUDE_CLIENT_ID,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        scope: 'user:inference',
+        state,
+      });
+
+      if (valid) setAiOAuthUrl(`${CLAUDE_AUTH_URL}?${params}`);
+    })();
+    return () => { valid = false; };
+  }, [aiSettingsTab, aiOAuthStep]);
 
   const verifyOAuthCode = useCallback(async () => {
     if (!aiOAuthCode.trim()) {
@@ -1960,18 +1968,25 @@ export default function App() {
                             <div>
                               {aiOAuthStep === 'init' ? (
                                 <div>
-                                  <button
-                                    onClick={startOAuth}
+                                  <a
+                                    href={aiOAuthUrl || '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      if (!aiOAuthUrl) e.preventDefault();
+                                      else startOAuth();
+                                    }}
                                     style={{
                                       width: '100%', padding: '11px', borderRadius: '8px', border: '1px solid #2a2a2e',
-                                      background: '#1a1a1e', color: '#ccc', fontSize: '13px', cursor: 'pointer',
+                                      background: '#1a1a1e', color: '#ccc', fontSize: '13px', cursor: aiOAuthUrl ? 'pointer' : 'default',
                                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                                      textDecoration: 'none', opacity: aiOAuthUrl ? 1 : 0.5, pointerEvents: aiOAuthUrl ? 'auto' : 'none'
                                     }}
                                     onMouseEnter={e => { e.currentTarget.style.background = '#222'; e.currentTarget.style.borderColor = '#333'; }}
                                     onMouseLeave={e => { e.currentTarget.style.background = '#1a1a1e'; e.currentTarget.style.borderColor = '#2a2a2e'; }}
                                   >
-                                    Sign in with Claude
-                                  </button>
+                                    {aiOAuthUrl ? 'Sign in with Claude' : 'Preparing...'}
+                                  </a>
                                   <div className="ai-chat-hint">This will open a browser window to authorize. Requires Pro or Max plan.</div>
                                 </div>
                               ) : (

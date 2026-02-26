@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const CLAUDE_TOKEN_URL = 'https://claude.ai/oauth/token';
-const CLIENT_ID = '9d1d2e07-b4c2-49b2-8e0e-c27002455657'; // Claude Code client_id
+const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Official Claude Code client_id
 
 export async function POST(request) {
   try {
