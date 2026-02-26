@@ -189,6 +189,23 @@ const AI_SUGGESTIONS = [
   'What cuts should I use for Z→μμ?',
 ];
 
+// OAuth PKCE helpers
+const CLAUDE_CLIENT_ID = '9d1d2e07-b4c2-49b2-8e0e-c27002455657';
+const CLAUDE_AUTH_URL = 'https://claude.ai/oauth/authorize';
+
+function generateCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function generateCodeChallenge(verifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 
 // Simple markdown renderer for AI responses
 function renderAIMarkdown(text) {
@@ -288,16 +305,17 @@ export default function App() {
   const [aiMessages, setAiMessages] = useState([]);
   const [aiStreaming, setAiStreaming] = useState(false);
   const [aiTokens, setAiTokens] = useState('');
-  const [aiTotalTokens, setAiTotalTokens] = useState(0);
-  const [aiInputValue, setAiInputValue] = useState('');
-  const [aiShowSettings, setAiShowSettings] = useState(false);
-  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514', authMode: 'apikey', sessionKey: '' });
+  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514', authMode: 'apikey', oauthToken: '', oauthExpiry: 0 });
   const [aiModels, setAiModels] = useState([]);
   const [aiError, setAiError] = useState('');
   const [aiSettingsTab, setAiSettingsTab] = useState('apikey');
+  const [aiOAuthStep, setAiOAuthStep] = useState('init');
+  const [aiOAuthCode, setAiOAuthCode] = useState('');
+  const [aiOAuthLoading, setAiOAuthLoading] = useState(false);
   const aiMessagesEndRef = useRef(null);
   const aiAbortRef = useRef(null);
   const aiTextareaRef = useRef(null);
+  const oauthVerifierRef = useRef(null);
 
   // Load AI config from localStorage
   useEffect(() => {
@@ -355,10 +373,85 @@ export default function App() {
     };
   }, [downloaded, inspectorData, selected]);
 
-  const isAiAuthed = aiConfig.authMode === 'session' ? !!aiConfig.sessionKey : !!aiConfig.apiKey;
+  const isAiAuthed = aiConfig.authMode === 'oauth' ? !!aiConfig.oauthToken : !!aiConfig.apiKey;
 
-  const disconnectSession = useCallback(() => {
-    saveAiConfig({ ...aiConfig, authMode: 'apikey', sessionKey: '' });
+  const startOAuth = useCallback(async () => {
+    const verifier = generateCodeVerifier();
+    oauthVerifierRef.current = verifier;
+    localStorage.setItem('opencern-oauth-verifier', verifier);
+
+    const challenge = await generateCodeChallenge(verifier);
+    // Use the exact redirect URI expected by the Claude Code client_id
+    const redirectUri = `http://localhost:54545/callback`;
+    const state = crypto.randomUUID();
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: CLAUDE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      scope: 'user:inference',
+      state,
+    });
+
+    window.open(`${CLAUDE_AUTH_URL}?${params}`, '_blank', 'width=600,height=700');
+    setAiOAuthStep('paste');
+    setAiError('');
+  }, []);
+
+  const verifyOAuthCode = useCallback(async () => {
+    if (!aiOAuthCode.trim()) {
+      setAiError('Please paste the authorization code first.');
+      return;
+    }
+    setAiOAuthLoading(true);
+    setAiError('');
+    try {
+      const verifier = oauthVerifierRef.current || localStorage.getItem('opencern-oauth-verifier');
+      if (!verifier) throw new Error('Code verifier lost. Please click "Start over" to restart the login process.');
+
+      const redirectUri = `http://localhost:54545/callback`;
+      const res = await fetch('/api/ai/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // The user might paste the entire URL or just the code
+          code: aiOAuthCode.includes('code=') ? new URLSearchParams(aiOAuthCode.split('?')[1]).get('code') : aiOAuthCode.trim(),
+          codeVerifier: verifier,
+          redirectUri,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Token exchange failed');
+      }
+
+      const tokens = await res.json();
+
+      const newConfig = {
+        ...aiConfig,
+        authMode: 'oauth',
+        oauthToken: tokens.access_token,
+        oauthExpiry: Date.now() + (tokens.expires_in || 3600) * 1000,
+        apiKey: '',
+      };
+      saveAiConfig(newConfig);
+      
+      setAiOAuthStep('init');
+      setAiOAuthCode('');
+      localStorage.removeItem('opencern-oauth-verifier');
+    } catch (err) {
+      setAiError(err.message);
+    } finally {
+      setAiOAuthLoading(false);
+    }
+  }, [aiOAuthCode, aiConfig, saveAiConfig]);
+
+  const disconnectOAuth = useCallback(() => {
+    saveAiConfig({ ...aiConfig, authMode: 'apikey', oauthToken: '', oauthExpiry: 0 });
+    setAiOAuthStep('init');
   }, [aiConfig, saveAiConfig]);
 
   const sendAiMessage = useCallback(async (content) => {
@@ -387,8 +480,8 @@ export default function App() {
           messages: allMessages,
           systemPrompt,
           model: aiConfig.model,
-          apiKey: aiConfig.authMode === 'session' ? undefined : aiConfig.apiKey,
-          oauthToken: aiConfig.authMode === 'session' ? aiConfig.sessionKey : undefined,
+          apiKey: aiConfig.authMode === 'oauth' ? undefined : aiConfig.apiKey,
+          oauthToken: aiConfig.authMode === 'oauth' ? aiConfig.oauthToken : undefined,
         }),
         signal: aiAbortRef.current.signal,
       });
@@ -1843,14 +1936,14 @@ export default function App() {
 
                       {aiSettingsTab === 'oauth' && (
                         <div className="ai-chat-settings-group">
-                          <label>Claude Session Token</label>
-                          {aiConfig.authMode === 'session' && aiConfig.sessionKey ? (
+                          <label>Claude Account</label>
+                          {aiConfig.authMode === 'oauth' && aiConfig.oauthToken ? (
                             <div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', background: '#1a1a1e', borderRadius: '8px', border: '1px solid #2a2a2e' }}>
                                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80', flexShrink: 0 }}></div>
-                                <span style={{ color: '#999', fontSize: '13px', flex: 1 }}>Using Session Token</span>
+                                <span style={{ color: '#999', fontSize: '13px', flex: 1 }}>Connected to Claude Pro/Max</span>
                                 <button
-                                  onClick={disconnectSession}
+                                  onClick={disconnectOAuth}
                                   style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '12px' }}
                                   onMouseEnter={e => e.currentTarget.style.color = '#aaa'}
                                   onMouseLeave={e => e.currentTarget.style.color = '#666'}
@@ -1858,21 +1951,65 @@ export default function App() {
                                   Disconnect
                                 </button>
                               </div>
-                              <div className="ai-chat-hint">Connected to your Claude account.</div>
+                              <div className="ai-chat-hint">Uses your Claude Pro/Max subscription.</div>
                             </div>
                           ) : (
                             <div>
-                              <input
-                                className="ai-chat-settings-input"
-                                type="password"
-                                value={aiConfig.sessionKey || ''}
-                                onChange={(e) => setAiConfig(prev => ({ ...prev, sessionKey: e.target.value, authMode: 'session' }))}
-                                placeholder="sk-ant-sid01-..."
-                                autoComplete="off"
-                              />
-                              <div className="ai-chat-hint">
-                                Log into <a href="https://claude.ai" target="_blank" rel="noopener noreferrer">claude.ai</a>, copy your session-key cookie, and paste it here.
-                              </div>
+                              {aiOAuthStep === 'init' ? (
+                                <div>
+                                  <button
+                                    onClick={startOAuth}
+                                    style={{
+                                      width: '100%', padding: '11px', borderRadius: '8px', border: '1px solid #2a2a2e',
+                                      background: '#1a1a1e', color: '#ccc', fontSize: '13px', cursor: 'pointer',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#222'; e.currentTarget.style.borderColor = '#333'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = '#1a1a1e'; e.currentTarget.style.borderColor = '#2a2a2e'; }}
+                                  >
+                                    Sign in with Claude
+                                  </button>
+                                  <div className="ai-chat-hint">This will open a browser window to authorize. Requires Pro or Max plan.</div>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                  <div style={{ fontSize: '13px', color: '#aaa', lineHeight: 1.5 }}>
+                                    1. Log in and authorize in the browser window.<br/>
+                                    2. It will redirect to a page that might say "Site can't be reached" (`localhost:54545`).<br/>
+                                    3. Copy the URL from your browser's address bar and paste it below:
+                                  </div>
+                                  <input
+                                    className="ai-chat-settings-input"
+                                    type="text"
+                                    value={aiOAuthCode}
+                                    onChange={(e) => setAiOAuthCode(e.target.value)}
+                                    placeholder="Paste the redirect URL or authorization code here..."
+                                    autoComplete="off"
+                                  />
+                                  {aiError && <div style={{ color: '#ef4444', fontSize: '12px' }}>{aiError}</div>}
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button
+                                      onClick={verifyOAuthCode}
+                                      disabled={aiOAuthLoading}
+                                      style={{
+                                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
+                                        background: '#34d399', color: '#000', fontSize: '13px', cursor: 'pointer', fontWeight: 500
+                                      }}
+                                    >
+                                      {aiOAuthLoading ? 'Verifying...' : 'Verify Code'}
+                                    </button>
+                                    <button
+                                      onClick={() => setAiOAuthStep('init')}
+                                      style={{
+                                        padding: '10px', borderRadius: '8px', border: '1px solid #333',
+                                        background: 'transparent', color: '#888', fontSize: '13px', cursor: 'pointer',
+                                      }}
+                                    >
+                                      Start over
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
