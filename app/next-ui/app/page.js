@@ -183,19 +183,10 @@ const IconAI = () => (
   </svg>
 );
 
-const AI_MODELS = [
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', desc: 'Recommended — fast & capable' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 3.5', desc: 'Fastest — quick queries' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', desc: 'Deepest — complex analysis' },
-];
-
 const AI_SUGGESTIONS = [
   'Analyze my processed data and find interesting physics',
   'Explain the Higgs boson decay to two photons',
-  'What analysis cuts should I apply for Z→μμ?',
-  'Compare CMS and ATLAS detector designs',
-  'Help me interpret this invariant mass distribution',
-  'What is the significance of a 5σ discovery?',
+  'What cuts should I use for Z→μμ?',
 ];
 
 // Simple markdown renderer for AI responses
@@ -300,6 +291,8 @@ export default function App() {
   const [aiInputValue, setAiInputValue] = useState('');
   const [aiShowSettings, setAiShowSettings] = useState(false);
   const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514' });
+  const [aiModels, setAiModels] = useState([]);
+  const [aiError, setAiError] = useState('');
   const aiMessagesEndRef = useRef(null);
   const aiAbortRef = useRef(null);
   const aiTextareaRef = useRef(null);
@@ -314,6 +307,23 @@ export default function App() {
       }
     } catch {}
   }, []);
+
+  // Fetch models from Anthropic when API key changes
+  useEffect(() => {
+    if (!aiConfig.apiKey) { setAiModels([]); return; }
+    let cancelled = false;
+    fetch(`/api/ai/models?apiKey=${encodeURIComponent(aiConfig.apiKey)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.data) return;
+        const models = data.data
+          .filter(m => m.id && m.id.startsWith('claude'))
+          .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        if (models.length > 0) setAiModels(models);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [aiConfig.apiKey]);
 
   // Auto-scroll AI messages
   useEffect(() => {
@@ -338,9 +348,10 @@ export default function App() {
   const sendAiMessage = useCallback(async (content) => {
     if (!content.trim() || aiStreaming) return;
     if (!aiConfig.apiKey) {
-      setAiShowSettings(true);
+      setAiError('Add your Anthropic API key in settings to start chatting.');
       return;
     }
+    setAiError('');
 
     const userMsg = { role: 'user', content: content.trim(), timestamp: new Date().toISOString() };
     setAiMessages(prev => [...prev, userMsg]);
@@ -1593,49 +1604,69 @@ export default function App() {
           {/* About Tab */}
           {activeTab === 'ai' && (
             <div className="ai-chat-container" style={{ height: 'calc(100vh - 60px)', margin: '-32px -48px', padding: 0 }}>
-              {/* Header */}
-              <div className="ai-chat-header">
-                <h2>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ background: 'linear-gradient(135deg, #d4a574, #c4956a)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 700 }}>✦</span>
-                    AI Analysis
-                  </span>
-                  {aiTotalTokens > 0 && (
-                    <span className="ai-chat-header-badge">{aiTotalTokens.toLocaleString()} tokens</span>
-                  )}
-                </h2>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {aiConfig.apiKey && (
-                    <div className="ai-chat-key-status">
-                      <span className="ai-chat-key-dot ai-chat-key-dot-active"></span>
-                      <span style={{ color: '#6b7280' }}>Key active</span>
+              {/* Gear icon, top right */}
+              <button className="ai-chat-gear-btn" onClick={() => setAiShowSettings(true)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+
+              {/* Empty state — centered input */}
+              {aiMessages.length === 0 && !aiStreaming ? (
+                <div className="ai-chat-welcome">
+                  <svg className="ai-chat-welcome-icon" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.5">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                    <polyline points="2 17 12 22 22 17"/>
+                    <polyline points="2 12 12 17 22 12"/>
+                  </svg>
+
+                  <div className="ai-chat-input-centered">
+                    <div className="ai-chat-input-box">
+                      <textarea
+                        ref={aiTextareaRef}
+                        className="ai-chat-textarea"
+                        value={aiInputValue}
+                        onChange={(e) => {
+                          setAiInputValue(e.target.value);
+                          setAiError('');
+                          e.target.style.height = 'auto';
+                          e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendAiMessage(aiInputValue);
+                          }
+                        }}
+                        placeholder="Ask about your physics data..."
+                        rows={1}
+                      />
+                      <div className="ai-chat-input-toolbar">
+                        <div className="ai-chat-toolbar-left">
+                          <select
+                            className="ai-chat-model-select"
+                            value={aiConfig.model}
+                            onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
+                          >
+                            {aiModels.length > 0 ? aiModels.map(m => (
+                              <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
+                            )) : (
+                              <option value={aiConfig.model}>{aiConfig.model.replace('claude-', 'Claude ').replace(/-\d{8}$/, '')}</option>
+                            )}
+                          </select>
+                        </div>
+                        <button
+                          className="ai-chat-send-btn"
+                          onClick={() => sendAiMessage(aiInputValue)}
+                          disabled={!aiInputValue.trim()}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                        </button>
+                      </div>
                     </div>
-                  )}
-                  <button className="ai-chat-settings-btn" onClick={() => setAiShowSettings(true)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                    Settings
-                  </button>
-                </div>
-              </div>
 
-              {/* No API key warning */}
-              {!aiConfig.apiKey && aiMessages.length === 0 && (
-                <div className="ai-chat-no-key">
-                  <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
-                  <div>
-                    <strong>API key required</strong> — Click <strong>Settings</strong> to enter your Anthropic API key.
-                    <div style={{ marginTop: '4px', fontSize: '12px', opacity: 0.8 }}>Get one free at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'underline' }}>console.anthropic.com</a></div>
-                  </div>
-                </div>
-              )}
+                    {aiError && (
+                      <div className="ai-chat-inline-error">{aiError}</div>
+                    )}
 
-              {/* Messages area */}
-              <div className="ai-chat-messages">
-                {aiMessages.length === 0 && aiConfig.apiKey && (
-                  <div className="ai-chat-welcome">
-                    <div className="ai-chat-welcome-icon">✦</div>
-                    <h3>Particle Physics Analysis Assistant</h3>
-                    <p>Ask questions about your data, physics concepts, analysis techniques, or get help interpreting results from the CERN Open Data Portal.</p>
                     <div className="ai-chat-suggestions">
                       {AI_SUGGESTIONS.map((s, i) => (
                         <button key={i} className="ai-chat-suggestion" onClick={() => sendAiMessage(s)}>
@@ -1644,130 +1675,125 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                )}
-
-                {aiMessages.map((msg, i) => (
-                  <div key={i} className={`ai-chat-message ai-chat-message-${msg.role}`}>
-                    <div className={`ai-chat-avatar ai-chat-avatar-${msg.role}`}>
-                      {msg.role === 'user' ? '→' : '✦'}
-                    </div>
-                    <div>
-                      <div className={`ai-chat-bubble ai-chat-bubble-${msg.role}`}>
-                        {msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content}
-                      </div>
-                      <div className="ai-chat-message-meta">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Streaming message */}
-                {aiStreaming && aiTokens && (
-                  <div className="ai-chat-message ai-chat-message-assistant">
-                    <div className="ai-chat-avatar ai-chat-avatar-assistant">✦</div>
-                    <div>
-                      <div className="ai-chat-bubble ai-chat-bubble-assistant">
-                        {renderAIMarkdown(aiTokens)}
-                        <span className="ai-chat-cursor"></span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Thinking indicator */}
-                {aiStreaming && !aiTokens && (
-                  <div className="ai-chat-message ai-chat-message-assistant">
-                    <div className="ai-chat-avatar ai-chat-avatar-assistant">✦</div>
-                    <div className="ai-chat-thinking">
-                      <div className="ai-chat-thinking-dots">
-                        <div className="ai-chat-thinking-dot"></div>
-                        <div className="ai-chat-thinking-dot"></div>
-                        <div className="ai-chat-thinking-dot"></div>
-                      </div>
-                      <span>Analyzing...</span>
-                    </div>
-                  </div>
-                )}
-
-                <div ref={aiMessagesEndRef} />
-              </div>
-
-              {/* Stop button */}
-              {aiStreaming && (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0' }}>
-                  <button className="ai-chat-stop-btn" onClick={stopAiStream}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                    Stop generating
-                  </button>
                 </div>
-              )}
+              ) : (
+                /* Conversation mode */
+                <>
+                  <div className="ai-chat-messages">
+                    {aiMessages.map((msg, i) => (
+                      <div key={i} className={`ai-chat-message ai-chat-message-${msg.role}`}>
+                        <div className={`ai-chat-bubble ai-chat-bubble-${msg.role}`}>
+                          {msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content}
+                        </div>
+                      </div>
+                    ))}
 
-              {/* Input area */}
-              <div className="ai-chat-input-area">
-                <div className="ai-chat-input-wrapper">
-                  <textarea
-                    ref={aiTextareaRef}
-                    className="ai-chat-textarea"
-                    value={aiInputValue}
-                    onChange={(e) => {
-                      setAiInputValue(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendAiMessage(aiInputValue);
-                      }
-                    }}
-                    placeholder="Ask about your physics data..."
-                    rows={1}
-                    disabled={aiStreaming}
-                  />
-                  <button
-                    className="ai-chat-send-btn"
-                    onClick={() => sendAiMessage(aiInputValue)}
-                    disabled={!aiInputValue.trim() || aiStreaming || !aiConfig.apiKey}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="22" y1="2" x2="11" y2="13"></line>
-                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                  </button>
-                </div>
-                <div className="ai-chat-input-footer">
-                  <span className="ai-chat-model-tag">
-                    {AI_MODELS.find(m => m.id === aiConfig.model)?.label || aiConfig.model}
-                    <span style={{ opacity: 0.5 }}>·</span>
-                    Shift+Enter for new line
-                  </span>
-                  {aiMessages.length > 0 && (
-                    <button
-                      onClick={clearAiChat}
-                      style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: '11px' }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#9ca3af'}
-                      onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}
-                    >
-                      Clear chat
-                    </button>
+                    {aiStreaming && aiTokens && (
+                      <div className="ai-chat-message ai-chat-message-assistant">
+                        <div className="ai-chat-bubble ai-chat-bubble-assistant">
+                          {renderAIMarkdown(aiTokens)}
+                          <span className="ai-chat-cursor"></span>
+                        </div>
+                      </div>
+                    )}
+
+                    {aiStreaming && !aiTokens && (
+                      <div className="ai-chat-message ai-chat-message-assistant">
+                        <div className="ai-chat-thinking">
+                          <div className="ai-chat-thinking-dots">
+                            <div className="ai-chat-thinking-dot"></div>
+                            <div className="ai-chat-thinking-dot"></div>
+                            <div className="ai-chat-thinking-dot"></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={aiMessagesEndRef} />
+                  </div>
+
+                  {aiStreaming && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0' }}>
+                      <button className="ai-chat-stop-btn" onClick={stopAiStream}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                        Stop
+                      </button>
+                    </div>
                   )}
-                </div>
-              </div>
+
+                  <div className="ai-chat-input-bottom">
+                    <div className="ai-chat-input-centered">
+                      <div className="ai-chat-input-box">
+                        <textarea
+                          ref={aiTextareaRef}
+                          className="ai-chat-textarea"
+                          value={aiInputValue}
+                          onChange={(e) => {
+                            setAiInputValue(e.target.value);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              sendAiMessage(aiInputValue);
+                            }
+                          }}
+                          placeholder="Ask a follow-up..."
+                          rows={1}
+                          disabled={aiStreaming}
+                        />
+                        <div className="ai-chat-input-toolbar">
+                          <div className="ai-chat-toolbar-left">
+                            <select
+                              className="ai-chat-model-select"
+                              value={aiConfig.model}
+                              onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
+                            >
+                              {aiModels.length > 0 ? aiModels.map(m => (
+                                <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
+                              )) : (
+                                <option value={aiConfig.model}>{aiConfig.model.replace('claude-', 'Claude ').replace(/-\d{8}$/, '')}</option>
+                              )}
+                            </select>
+                          </div>
+                          <button
+                            className="ai-chat-send-btn"
+                            onClick={() => sendAiMessage(aiInputValue)}
+                            disabled={!aiInputValue.trim() || aiStreaming}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="ai-chat-input-footer">
+                        <span style={{ color: '#444', fontSize: '11px' }}>Shift+Enter for new line</span>
+                        <button
+                          onClick={clearAiChat}
+                          style={{ background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '11px' }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#777'}
+                          onMouseLeave={e => e.currentTarget.style.color = '#444'}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Settings Panel */}
               {aiShowSettings && (
                 <div className="ai-chat-settings-overlay" onClick={() => setAiShowSettings(false)}>
                   <div className="ai-chat-settings-panel" onClick={e => e.stopPropagation()}>
                     <div className="ai-chat-settings-header">
-                      <h3>AI Settings</h3>
+                      <h3>Settings</h3>
                       <button className="ai-chat-settings-close" onClick={() => setAiShowSettings(false)}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                       </button>
                     </div>
                     <div className="ai-chat-settings-body">
                       <div className="ai-chat-settings-group">
-                        <label>Anthropic API Key</label>
+                        <label>API Key</label>
                         <input
                           className="ai-chat-settings-input"
                           type="password"
@@ -1777,38 +1803,13 @@ export default function App() {
                           autoComplete="off"
                         />
                         <div className="ai-chat-hint">
-                          Your key is stored locally in this browser. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key →</a>
-                        </div>
-                      </div>
-
-                      <div className="ai-chat-settings-group">
-                        <label>Model</label>
-                        <select
-                          className="ai-chat-settings-select"
-                          value={aiConfig.model}
-                          onChange={(e) => setAiConfig(prev => ({ ...prev, model: e.target.value }))}
-                        >
-                          {AI_MODELS.map(m => (
-                            <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="ai-chat-settings-group">
-                        <label>Session Info</label>
-                        <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
-                          <div>Messages: {aiMessages.length}</div>
-                          <div>Total tokens: {aiTotalTokens.toLocaleString()}</div>
-                          <div>Datasets loaded: {downloaded.length}</div>
+                          Stored locally. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key →</a>
                         </div>
                       </div>
                     </div>
                     <div className="ai-chat-settings-footer">
                       <button className="ai-chat-settings-save" onClick={() => { saveAiConfig(aiConfig); setAiShowSettings(false); }}>
-                        Save Settings
-                      </button>
-                      <button className="ai-chat-settings-clear" onClick={clearAiChat}>
-                        Clear Chat
+                        Save
                       </button>
                     </div>
                   </div>
