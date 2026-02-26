@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { buildSystemPrompt } from './aiSystemPrompt';
+import './AIChat.css';
 
 // Monaco wrapper that loads the editor entirely at runtime to avoid Turbopack
 // trying to resolve the CDN URL inside @monaco-editor/loader as a filesystem path.
@@ -170,6 +172,102 @@ const Logo = () => (
   </svg>
 );
 
+const IconAI = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
+    <path d="M6 10a6 6 0 0 0 12 0"></path>
+    <line x1="12" y1="16" x2="12" y2="22"></line>
+    <path d="M8 22h8"></path>
+    <circle cx="6" cy="6" r="1"></circle>
+    <circle cx="18" cy="6" r="1"></circle>
+  </svg>
+);
+
+const AI_MODELS = [
+  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', desc: 'Recommended — fast & capable' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 3.5', desc: 'Fastest — quick queries' },
+  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', desc: 'Deepest — complex analysis' },
+];
+
+const AI_SUGGESTIONS = [
+  'Analyze my processed data and find interesting physics',
+  'Explain the Higgs boson decay to two photons',
+  'What analysis cuts should I apply for Z→μμ?',
+  'Compare CMS and ATLAS detector designs',
+  'Help me interpret this invariant mass distribution',
+  'What is the significance of a 5σ discovery?',
+];
+
+// Simple markdown renderer for AI responses
+function renderAIMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const elements = [];
+  let inCodeBlock = false;
+  let codeLines = [];
+  let codeLang = '';
+  let key = 0;
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        elements.push(
+          <pre key={key++} style={{ background: '#0d0d12', border: '1px solid #1e1e28', borderRadius: '8px', padding: '14px 16px', margin: '10px 0', overflowX: 'auto', fontSize: '13px', lineHeight: 1.5 }}>
+            <code>{codeLines.join('\n')}</code>
+          </pre>
+        );
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+        codeLang = line.slice(3).trim();
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+    // Headers
+    if (line.startsWith('### ')) {
+      elements.push(<h4 key={key++} style={{ fontSize: '14px', fontWeight: 600, color: '#f3f4f6', margin: '14px 0 6px' }}>{line.slice(4)}</h4>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h3 key={key++} style={{ fontSize: '15px', fontWeight: 600, color: '#f3f4f6', margin: '16px 0 8px' }}>{line.slice(3)}</h3>);
+    } else if (line.startsWith('# ')) {
+      elements.push(<h2 key={key++} style={{ fontSize: '16px', fontWeight: 700, color: '#f3f4f6', margin: '18px 0 10px' }}>{line.slice(2)}</h2>);
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      elements.push(<div key={key++} style={{ paddingLeft: '16px', margin: '2px 0' }}>• {renderInlineMarkdown(line.slice(2))}</div>);
+    } else if (/^\d+\.\s/.test(line)) {
+      const match = line.match(/^(\d+)\.\s(.*)/);
+      elements.push(<div key={key++} style={{ paddingLeft: '16px', margin: '2px 0' }}>{match[1]}. {renderInlineMarkdown(match[2])}</div>);
+    } else if (line.trim() === '') {
+      elements.push(<div key={key++} style={{ height: '8px' }} />);
+    } else {
+      elements.push(<p key={key++} style={{ margin: '4px 0', lineHeight: 1.65 }}>{renderInlineMarkdown(line)}</p>);
+    }
+  }
+
+  if (inCodeBlock && codeLines.length) {
+    elements.push(
+      <pre key={key++} style={{ background: '#0d0d12', border: '1px solid #1e1e28', borderRadius: '8px', padding: '14px 16px', margin: '10px 0', overflowX: 'auto', fontSize: '13px' }}>
+        <code>{codeLines.join('\n')}</code>
+      </pre>
+    );
+  }
+
+  return elements;
+}
+
+function renderInlineMarkdown(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i} style={{ color: '#f9fafb', fontWeight: 600 }}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={i} style={{ background: '#0d0d12', color: '#a5f3fc', padding: '2px 6px', borderRadius: '4px', fontSize: '13px', fontFamily: "var(--font-geist-mono), 'SF Mono', monospace" }}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**')) return <em key={i}>{part.slice(1, -1)}</em>;
+    return part;
+  });
+}
+
 export default function App() {
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -193,6 +291,143 @@ export default function App() {
   const [inspectorPage, setInspectorPage] = useState(1);
   const [loadingInspector, setLoadingInspector] = useState(false);
   const editorRef = useRef(null);
+
+  // AI Chat state
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiTokens, setAiTokens] = useState('');
+  const [aiTotalTokens, setAiTotalTokens] = useState(0);
+  const [aiInputValue, setAiInputValue] = useState('');
+  const [aiShowSettings, setAiShowSettings] = useState(false);
+  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514' });
+  const aiMessagesEndRef = useRef(null);
+  const aiAbortRef = useRef(null);
+  const aiTextareaRef = useRef(null);
+
+  // Load AI config from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('opencern-ai-config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setAiConfig(prev => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+  }, []);
+
+  // Auto-scroll AI messages
+  useEffect(() => {
+    aiMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [aiMessages, aiTokens]);
+
+  const saveAiConfig = useCallback((newConfig) => {
+    setAiConfig(newConfig);
+    try {
+      localStorage.setItem('opencern-ai-config', JSON.stringify(newConfig));
+    } catch {}
+  }, []);
+
+  const buildContext = useCallback(() => {
+    return {
+      downloadedDatasets: downloaded.map(d => d.title || d.name || d),
+      totalEvents: inspectorData?.totalEvents,
+      experiment: selected?.experiment,
+    };
+  }, [downloaded, inspectorData, selected]);
+
+  const sendAiMessage = useCallback(async (content) => {
+    if (!content.trim() || aiStreaming) return;
+    if (!aiConfig.apiKey) {
+      setAiShowSettings(true);
+      return;
+    }
+
+    const userMsg = { role: 'user', content: content.trim(), timestamp: new Date().toISOString() };
+    setAiMessages(prev => [...prev, userMsg]);
+    setAiInputValue('');
+    setAiStreaming(true);
+    setAiTokens('');
+
+    const allMessages = [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
+    const systemPrompt = buildSystemPrompt(buildContext());
+
+    try {
+      aiAbortRef.current = new AbortController();
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: allMessages,
+          systemPrompt,
+          model: aiConfig.model,
+          apiKey: aiConfig.apiKey,
+        }),
+        signal: aiAbortRef.current.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to get response');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === 'token') {
+              fullText += evt.text;
+              setAiTokens(fullText);
+            } else if (evt.type === 'done') {
+              setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
+            } else if (evt.type === 'error') {
+              throw new Error(evt.error);
+            }
+          } catch {}
+        }
+      }
+
+      setAiMessages(prev => [...prev, { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }]);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setAiMessages(prev => [...prev, { role: 'assistant', content: `⚠️ Error: ${err.message}`, timestamp: new Date().toISOString(), isError: true }]);
+      }
+    } finally {
+      setAiStreaming(false);
+      setAiTokens('');
+    }
+  }, [aiConfig, aiMessages, aiStreaming, buildContext]);
+
+  const stopAiStream = useCallback(() => {
+    aiAbortRef.current?.abort();
+    setAiStreaming(false);
+    if (aiTokens) {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: aiTokens + '\n\n*[Response stopped]*', timestamp: new Date().toISOString() }]);
+      setAiTokens('');
+    }
+  }, [aiTokens]);
+
+  const clearAiChat = useCallback(() => {
+    setAiMessages([]);
+    setAiTotalTokens(0);
+  }, []);
+
+  const maskApiKey = (key) => {
+    if (!key || key.length < 12) return key || '';
+    return key.slice(0, 7) + '••••••••' + key.slice(-4);
+  };
 
   const saveProcessedFile = async (filename) => {
      if (!editorRef.current) return;
@@ -558,6 +793,7 @@ export default function App() {
             { id: 'downloaded', label: 'Local Storage', icon: <IconFolder /> },
             { id: 'workspace', label: 'IDE Workspace', icon: <IconFile /> },
             { id: 'visualize', label: 'Visualization', icon: <IconEye /> },
+            { id: 'ai', label: 'AI Analysis', icon: <IconAI /> },
             { id: 'about', label: 'About', icon: <IconInfo /> }
           ].map(tab => (
             <button
@@ -1355,6 +1591,232 @@ export default function App() {
           )}
 
           {/* About Tab */}
+          {activeTab === 'ai' && (
+            <div className="ai-chat-container" style={{ height: 'calc(100vh - 60px)', margin: '-32px -48px', padding: 0 }}>
+              {/* Header */}
+              <div className="ai-chat-header">
+                <h2>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ background: 'linear-gradient(135deg, #d4a574, #c4956a)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 700 }}>✦</span>
+                    AI Analysis
+                  </span>
+                  {aiTotalTokens > 0 && (
+                    <span className="ai-chat-header-badge">{aiTotalTokens.toLocaleString()} tokens</span>
+                  )}
+                </h2>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {aiConfig.apiKey && (
+                    <div className="ai-chat-key-status">
+                      <span className="ai-chat-key-dot ai-chat-key-dot-active"></span>
+                      <span style={{ color: '#6b7280' }}>Key active</span>
+                    </div>
+                  )}
+                  <button className="ai-chat-settings-btn" onClick={() => setAiShowSettings(true)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Settings
+                  </button>
+                </div>
+              </div>
+
+              {/* No API key warning */}
+              {!aiConfig.apiKey && aiMessages.length === 0 && (
+                <div className="ai-chat-no-key">
+                  <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+                  <div>
+                    <strong>API key required</strong> — Click <strong>Settings</strong> to enter your Anthropic API key.
+                    <div style={{ marginTop: '4px', fontSize: '12px', opacity: 0.8 }}>Get one free at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'underline' }}>console.anthropic.com</a></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages area */}
+              <div className="ai-chat-messages">
+                {aiMessages.length === 0 && aiConfig.apiKey && (
+                  <div className="ai-chat-welcome">
+                    <div className="ai-chat-welcome-icon">✦</div>
+                    <h3>Particle Physics Analysis Assistant</h3>
+                    <p>Ask questions about your data, physics concepts, analysis techniques, or get help interpreting results from the CERN Open Data Portal.</p>
+                    <div className="ai-chat-suggestions">
+                      {AI_SUGGESTIONS.map((s, i) => (
+                        <button key={i} className="ai-chat-suggestion" onClick={() => sendAiMessage(s)}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {aiMessages.map((msg, i) => (
+                  <div key={i} className={`ai-chat-message ai-chat-message-${msg.role}`}>
+                    <div className={`ai-chat-avatar ai-chat-avatar-${msg.role}`}>
+                      {msg.role === 'user' ? '→' : '✦'}
+                    </div>
+                    <div>
+                      <div className={`ai-chat-bubble ai-chat-bubble-${msg.role}`}>
+                        {msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content}
+                      </div>
+                      <div className="ai-chat-message-meta">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Streaming message */}
+                {aiStreaming && aiTokens && (
+                  <div className="ai-chat-message ai-chat-message-assistant">
+                    <div className="ai-chat-avatar ai-chat-avatar-assistant">✦</div>
+                    <div>
+                      <div className="ai-chat-bubble ai-chat-bubble-assistant">
+                        {renderAIMarkdown(aiTokens)}
+                        <span className="ai-chat-cursor"></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Thinking indicator */}
+                {aiStreaming && !aiTokens && (
+                  <div className="ai-chat-message ai-chat-message-assistant">
+                    <div className="ai-chat-avatar ai-chat-avatar-assistant">✦</div>
+                    <div className="ai-chat-thinking">
+                      <div className="ai-chat-thinking-dots">
+                        <div className="ai-chat-thinking-dot"></div>
+                        <div className="ai-chat-thinking-dot"></div>
+                        <div className="ai-chat-thinking-dot"></div>
+                      </div>
+                      <span>Analyzing...</span>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={aiMessagesEndRef} />
+              </div>
+
+              {/* Stop button */}
+              {aiStreaming && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0' }}>
+                  <button className="ai-chat-stop-btn" onClick={stopAiStream}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                    Stop generating
+                  </button>
+                </div>
+              )}
+
+              {/* Input area */}
+              <div className="ai-chat-input-area">
+                <div className="ai-chat-input-wrapper">
+                  <textarea
+                    ref={aiTextareaRef}
+                    className="ai-chat-textarea"
+                    value={aiInputValue}
+                    onChange={(e) => {
+                      setAiInputValue(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendAiMessage(aiInputValue);
+                      }
+                    }}
+                    placeholder="Ask about your physics data..."
+                    rows={1}
+                    disabled={aiStreaming}
+                  />
+                  <button
+                    className="ai-chat-send-btn"
+                    onClick={() => sendAiMessage(aiInputValue)}
+                    disabled={!aiInputValue.trim() || aiStreaming || !aiConfig.apiKey}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                  </button>
+                </div>
+                <div className="ai-chat-input-footer">
+                  <span className="ai-chat-model-tag">
+                    {AI_MODELS.find(m => m.id === aiConfig.model)?.label || aiConfig.model}
+                    <span style={{ opacity: 0.5 }}>·</span>
+                    Shift+Enter for new line
+                  </span>
+                  {aiMessages.length > 0 && (
+                    <button
+                      onClick={clearAiChat}
+                      style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: '11px' }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#9ca3af'}
+                      onMouseLeave={e => e.currentTarget.style.color = '#4b5563'}
+                    >
+                      Clear chat
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Settings Panel */}
+              {aiShowSettings && (
+                <div className="ai-chat-settings-overlay" onClick={() => setAiShowSettings(false)}>
+                  <div className="ai-chat-settings-panel" onClick={e => e.stopPropagation()}>
+                    <div className="ai-chat-settings-header">
+                      <h3>AI Settings</h3>
+                      <button className="ai-chat-settings-close" onClick={() => setAiShowSettings(false)}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                    <div className="ai-chat-settings-body">
+                      <div className="ai-chat-settings-group">
+                        <label>Anthropic API Key</label>
+                        <input
+                          className="ai-chat-settings-input"
+                          type="password"
+                          value={aiConfig.apiKey}
+                          onChange={(e) => setAiConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                          placeholder="sk-ant-api03-..."
+                          autoComplete="off"
+                        />
+                        <div className="ai-chat-hint">
+                          Your key is stored locally in this browser. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key →</a>
+                        </div>
+                      </div>
+
+                      <div className="ai-chat-settings-group">
+                        <label>Model</label>
+                        <select
+                          className="ai-chat-settings-select"
+                          value={aiConfig.model}
+                          onChange={(e) => setAiConfig(prev => ({ ...prev, model: e.target.value }))}
+                        >
+                          {AI_MODELS.map(m => (
+                            <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="ai-chat-settings-group">
+                        <label>Session Info</label>
+                        <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+                          <div>Messages: {aiMessages.length}</div>
+                          <div>Total tokens: {aiTotalTokens.toLocaleString()}</div>
+                          <div>Datasets loaded: {downloaded.length}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="ai-chat-settings-footer">
+                      <button className="ai-chat-settings-save" onClick={() => { saveAiConfig(aiConfig); setAiShowSettings(false); }}>
+                        Save Settings
+                      </button>
+                      <button className="ai-chat-settings-clear" onClick={clearAiChat}>
+                        Clear Chat
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'about' && (
             <div style={{ maxWidth: '640px', margin: '40px auto 0 auto', background: '#131317', padding: '48px', borderRadius: '12px', border: '1px solid #232328', textAlign: 'center' }}>
               <div style={{ display: 'flex', justifyContent: 'center', color: '#f3f4f6', marginBottom: '24px' }}>
