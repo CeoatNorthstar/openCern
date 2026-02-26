@@ -1,17 +1,17 @@
 // Next.js API Route — Streaming proxy to Anthropic Claude API
 // POST /api/ai/chat
-// The API key is provided by the user (BYO key), not stored server-side.
+// Supports both API key and OAuth token authentication.
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { messages, systemPrompt, model, apiKey } = await request.json();
+    const { messages, systemPrompt, model, apiKey, oauthToken } = await request.json();
 
-    if (!apiKey) {
+    if (!apiKey && !oauthToken) {
       return Response.json(
-        { error: 'No API key provided. Configure your Anthropic API key in AI Settings.' },
+        { error: 'No authentication provided. Add an API key or connect your account.' },
         { status: 400 }
       );
     }
@@ -26,13 +26,20 @@ export async function POST(request) {
       content: m.content,
     }));
 
+    // Different headers depending on auth method
+    const headers = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    };
+    if (oauthToken) {
+      headers['Authorization'] = `Bearer ${oauthToken}`;
+    } else {
+      headers['x-api-key'] = apiKey;
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers,
       body: JSON.stringify({
         model: model || 'claude-sonnet-4-20250514',
         max_tokens: 4096,
