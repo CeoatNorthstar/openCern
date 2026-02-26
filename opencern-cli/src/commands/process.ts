@@ -1,22 +1,50 @@
-// TODO: /process Command Handler
-//
-// Processes ROOT files using the C++ physics engine via Docker.
-//
-// Usage:
-//   /process                      → Pick from local ROOT files interactively
-//   /process --all                → Process all ROOT files in current dataset
-//   /process --file data.root     → Process a specific file
-//   /process --folder atlas-2024  → Process all ROOT files in a folder
-//
-// Flow:
-//   1. Lists available ROOT files (calls API /files)
-//   2. User selects file(s) to process
-//   3. Calls API /process (single) or /process/folder (batch)
-//   4. Polls /process/status for progress
-//   5. Shows ProgressBar with file-by-file progress
-//   6. On completion, shows summary: events found, particle types, peak HT
-//   7. Asks if user wants to /open or /ask about the results
-//   8. Updates session context with processing results
-//
-// The actual C++ processing happens inside Docker — this command
-// just orchestrates the API calls and shows the TUI.
+import { cernApi } from '../services/cern-api.js';
+import type { ProcessStatus, LocalFile } from '../services/cern-api.js';
+
+export type { ProcessStatus };
+
+export async function listRootFiles(): Promise<LocalFile[]> {
+  const files = await cernApi.listFiles();
+  return files.filter(f => f.type === 'root');
+}
+
+export async function processFile(filePath: string): Promise<string> {
+  const result = await cernApi.processFile(filePath);
+  return result.id;
+}
+
+export async function processFolder(folderPath: string): Promise<string> {
+  const result = await cernApi.processFolder(folderPath);
+  return result.id;
+}
+
+export async function pollProcess(
+  id: string,
+  onProgress: (status: ProcessStatus) => void
+): Promise<ProcessStatus> {
+  while (true) {
+    const status = await cernApi.processStatus(id);
+    onProgress(status);
+    if (status.status === 'complete' || status.status === 'error') {
+      return status;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
+export function formatEventSummary(results?: ProcessStatus['results']): string[] {
+  if (!results) return [];
+  const lines: string[] = [
+    `  Events found:  ${results.eventCount.toLocaleString()}`,
+    `  Experiment:    ${results.experiment}`,
+    `  Peak HT:       ${results.peakHT.toFixed(1)} GeV`,
+    `  Output file:   ${results.outputFile}`,
+  ];
+  if (results.particles && Object.keys(results.particles).length > 0) {
+    lines.push('  Particles:');
+    for (const [p, count] of Object.entries(results.particles)) {
+      lines.push(`    ${p.padEnd(12)} ${count}`);
+    }
+  }
+  return lines;
+}

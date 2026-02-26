@@ -1,0 +1,20 @@
+import { openFile } from './open.js';
+import { askQuestion } from './ask.js';
+import { anthropicService } from '../services/anthropic.js';
+export async function openAndAsk(filePath, onToken, signal) {
+    const file = await openFile(filePath);
+    const typeLabel = file.fileType === 'root-meta'
+        ? 'ROOT file structure'
+        : 'particle physics dataset';
+    const prompt = `Please analyze this ${typeLabel}. Provide:
+1. What experiment and dataset type this appears to be
+2. Key physics observables present
+3. Notable features, anomalies, or interesting patterns
+4. Recommended next analysis steps (e.g., suggest /quantum if signal separation looks promising)`;
+    anthropicService.addContext({
+        processedFiles: [file.filename],
+    });
+    const result = await askQuestion(prompt, { file: file.fileType === 'json' ? filePath : undefined }, anthropicService.getContext(), onToken, signal);
+    return { file, totalTokens: result.totalTokens };
+}
+//# sourceMappingURL=opask.js.map

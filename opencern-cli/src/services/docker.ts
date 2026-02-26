@@ -1,26 +1,141 @@
-// TODO: Docker Service
-//
-// Manages Docker container lifecycle for the CLI.
-// Starts/stops the OpenCERN containers that the CLI depends on.
-//
-// Key methods:
-//   - isDockerRunning(): Check if Docker daemon is available
-//   - startContainers(): Run `docker compose -p opencern up -d`
-//   - stopContainers(): Run `docker compose -p opencern stop`
-//   - getContainerStatus(): Check which containers are running
-//   - isApiReady(): Poll localhost:8080/health
-//   - isQuantumReady(): Poll quantum container health
-//   - getLogs(container): Stream container logs
-//
-// Auto-start behavior:
-//   - On CLI launch, check if containers are running
-//   - If not, offer to start them (or auto-start if configured)
-//   - Show startup progress in StatusBar
-//   - Don't start quantum container unless /quantum is used
-//
-// The CLI requires these containers:
-//   - opencern-api (port 8080) — Required always
-//   - opencern-streamer (port 9001/9002) — For data streaming
-//   - opencern-xrootd (port 8081) — For CERN data downloads
-//   - opencern-quantum (new) — Only when /quantum is used
-//   - opencern-frontend (port 3000) — NOT needed for CLI
+import { execSync, spawn } from 'child_process';
+import { existsSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import axios from 'axios';
+import { config } from '../utils/config.js';
+
+const COMPOSE_FILE = join(homedir(), '.opencern', 'docker-compose.yml');
+
+const DOCKER_COMPOSE_TEMPLATE = `version: '3.8'
+services:
+  api:
+    image: opencernhq/api:latest
+    container_name: opencern-api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/opencern-datasets:/data
+    restart: unless-stopped
+
+  xrootd:
+    image: opencernhq/xrootd:latest
+    container_name: opencern-xrootd
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  streamer:
+    image: opencernhq/streamer:latest
+    container_name: opencern-streamer
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+    restart: unless-stopped
+`;
+
+const QUANTUM_SERVICE = `
+  quantum:
+    image: opencernhq/quantum:latest
+    container_name: opencern-quantum
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+`;
+
+function ensureComposeFile(includeQuantum = false): void {
+  const content = DOCKER_COMPOSE_TEMPLATE + (includeQuantum ? QUANTUM_SERVICE : '');
+  writeFileSync(COMPOSE_FILE, content);
+}
+
+function dockerCmd(args: string[]): string {
+  try {
+    return execSync(['docker', ...args].join(' '), { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+
+function composeCmd(args: string[]): string {
+  if (!existsSync(COMPOSE_FILE)) ensureComposeFile();
+  return dockerCmd(['compose', '-f', COMPOSE_FILE, ...args]);
+}
+
+export const docker = {
+  isDockerRunning(): boolean {
+    try {
+      execSync('docker info 2>/dev/null', { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async pullImages(includeQuantum = false): Promise<void> {
+    const images = [
+      'opencernhq/api:latest',
+      'opencernhq/xrootd:latest',
+      'opencernhq/streamer:latest',
+      ...(includeQuantum ? ['opencernhq/quantum:latest'] : []),
+    ];
+    for (const image of images) {
+      execSync(`docker pull ${image}`, { stdio: 'inherit' });
+    }
+  },
+
+  async startContainers(includeQuantum = false): Promise<void> {
+    ensureComposeFile(includeQuantum);
+    execSync(`docker compose -f ${COMPOSE_FILE} up -d`, { stdio: 'inherit' });
+  },
+
+  async stopContainers(): Promise<void> {
+    if (!existsSync(COMPOSE_FILE)) return;
+    execSync(`docker compose -f ${COMPOSE_FILE} stop`, { stdio: 'inherit' });
+  },
+
+  getStatus(): Record<string, { running: boolean; status: string }> {
+    const containers = ['opencern-api', 'opencern-xrootd', 'opencern-streamer', 'opencern-quantum'];
+    const result: Record<string, { running: boolean; status: string }> = {};
+    for (const name of containers) {
+      try {
+        const out = dockerCmd(['inspect', '--format', '{{.State.Status}}', name]);
+        const status = out.trim();
+        result[name] = { running: status === 'running', status: status || 'not found' };
+      } catch {
+        result[name] = { running: false, status: 'not found' };
+      }
+    }
+    return result;
+  },
+
+  async isApiReady(): Promise<boolean> {
+    try {
+      const baseURL = config.get('apiBaseUrl');
+      const res = await axios.get(`${baseURL}/health`, { timeout: 3000 });
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  },
+
+  async isQuantumReady(): Promise<boolean> {
+    try {
+      const res = await axios.get('http://localhost:8082/health', { timeout: 3000 });
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  },
+
+  getLogs(service: string): string {
+    return composeCmd(['logs', '--tail=50', service]);
+  },
+
+  getComposeFile(): string {
+    return COMPOSE_FILE;
+  },
+
+  ensureComposeFile,
+};
+
+export default docker;

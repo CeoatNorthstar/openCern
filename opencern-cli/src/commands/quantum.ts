@@ -1,28 +1,69 @@
-// TODO: /quantum Command Handler
-//
-// Quantum computing analysis of particle physics data.
-//
-// Usage:
-//   /quantum classify data.json       → Run VQC event classification
-//   /quantum --backend ibm            → Switch to IBM Quantum hardware
-//   /quantum --backend local          → Use local Qiskit Aer simulator
-//   /quantum --backend braket         → Use Amazon Braket
-//   /quantum status                   → Show current backend, pending jobs
-//   /quantum results                  → Show last quantum analysis results
-//
-// Flow:
-//   1. Reads processed event JSON file
-//   2. Extracts physics features (pT, eta, phi, energy, particle type)
-//   3. Sends to quantum service (Python container running Qiskit)
-//   4. Quantum service encodes features into VQC circuit parameters
-//   5. Runs circuit on selected backend (simulator or real QPU)
-//   6. Returns classification results (signal vs background)
-//   7. Renders via <QuantumPanel /> component
-//
-// Backend configuration:
-//   - local: Qiskit Aer simulator (free, instant, no API key)
-//   - ibm: IBM Quantum (free tier, 127 qubits, requires API key)
-//   - braket: Amazon Braket (paid, IonQ/Rigetti, requires AWS creds)
-//
-// The quantum service runs in its own Docker container (containers/quantum/)
-// and communicates via a REST API. The CLI just orchestrates and displays.
+import { readFileSync, existsSync } from 'fs';
+import { quantumService } from '../services/quantum.js';
+import type { QuantumEvent, QuantumJob } from '../services/quantum.js';
+import { config } from '../utils/config.js';
+import { docker } from '../services/docker.js';
+
+export async function ensureQuantumRunning(): Promise<boolean> {
+  const status = await quantumService.getStatus();
+  if (status.healthy) return true;
+
+  if (!docker.isDockerRunning()) return false;
+
+  try {
+    await docker.startContainers(true);
+    // Wait up to 30s for quantum container to become healthy
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const s = await quantumService.getStatus();
+      if (s.healthy) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function extractEvents(filePath: string): QuantumEvent[] {
+  if (!existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
+
+  const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+  const eventList: unknown[] = raw.events || raw.particles || (Array.isArray(raw) ? raw : []);
+
+  if (!Array.isArray(eventList)) throw new Error('No event array found in file');
+
+  const maxEvents = config.get('maxEvents');
+  const events: QuantumEvent[] = [];
+
+  for (const e of eventList.slice(0, maxEvents)) {
+    const ev = e as Record<string, unknown>;
+    events.push({
+      pt: Number(ev.pt ?? ev.pT ?? ev.transverse_momentum ?? 0),
+      eta: Number(ev.eta ?? ev.pseudorapidity ?? 0),
+      phi: Number(ev.phi ?? ev.azimuthal_angle ?? 0),
+      energy: Number(ev.energy ?? ev.E ?? 0),
+      particleType: String(ev.type ?? ev.particle_type ?? ev.pdgId ?? ''),
+    });
+  }
+
+  return events;
+}
+
+export async function runClassification(
+  events: QuantumEvent[],
+  onStatus: (job: QuantumJob) => void
+): Promise<QuantumJob> {
+  const backend = config.get('quantumBackend');
+  const shots = config.get('quantumShots');
+
+  const { jobId } = await quantumService.classify({ events, backend, shots });
+
+  while (true) {
+    const job = await quantumService.getResults(jobId);
+    onStatus(job);
+    if (job.status === 'complete' || job.status === 'error') {
+      return job;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}

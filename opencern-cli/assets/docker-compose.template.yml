@@ -1,0 +1,58 @@
+version: '3.8'
+
+# OpenCERN CLI — Docker Compose
+# Images pulled from Docker Hub: https://hub.docker.com/u/opencernhq
+# This file is auto-generated to ~/.opencern/docker-compose.yml on first run.
+
+services:
+  api:
+    image: opencernhq/api:latest
+    container_name: opencern-api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/opencern-datasets:/data
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  xrootd:
+    image: opencernhq/xrootd:latest
+    container_name: opencern-xrootd
+    ports:
+      - "8081:8081"
+    volumes:
+      - ~/opencern-datasets:/data
+    restart: unless-stopped
+
+  streamer:
+    image: opencernhq/streamer:latest
+    container_name: opencern-streamer
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+    restart: unless-stopped
+
+# Quantum service is started on-demand when /quantum is used
+# Uncomment to always start it:
+#  quantum:
+#    image: opencernhq/quantum:latest
+#    container_name: opencern-quantum
+#    ports:
+#      - "8082:8082"
+#    restart: unless-stopped
+#    healthcheck:
+#      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 60s
+
+volumes: {}

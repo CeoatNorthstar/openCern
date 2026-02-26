@@ -1,26 +1,36 @@
-// TODO: /opask Command Handler
-//
-// Combined Open + Ask — opens a file and immediately starts AI analysis.
-// This is the power-user command for quick insights.
-//
-// Usage:
-//   /opask results.json           → Open file + AI analysis in split view
-//   /opask atlas-higgs.json       → Same, but for a specific dataset
-//
-// Layout (split terminal):
-//   ┌─ AI Analysis ──────────┬─ File Preview ──────────────┐
-//   │                        │  {                           │
-//   │  This dataset shows    │    "events": [               │
-//   │  evidence of Z→μμ      │      { "pt": 45.2, ... }    │
-//   │  decays with a peak    │    ],                        │
-//   │  at 91.2 GeV...        │    "metadata": { ... }       │
-//   │                        │  }                           │
-//   └────────────────────────┴─────────────────────────────┘
-//
-// Flow:
-//   1. Reads the specified JSON file
-//   2. Renders side-by-side: <AIStream /> on left, <FilePreview /> on right
-//   3. Sends file contents to Claude with physics analysis prompt
-//   4. AI streams its analysis while user can scroll through the file
-//   5. After analysis, user can ask follow-up questions
-//   6. File preview highlights sections that AI references
+import { openFile } from './open.js';
+import type { FileContent } from './open.js';
+import { askQuestion } from './ask.js';
+import { anthropicService } from '../services/anthropic.js';
+
+export async function openAndAsk(
+  filePath: string,
+  onToken: (token: string) => void,
+  signal?: AbortSignal
+): Promise<{ file: FileContent; totalTokens: number }> {
+  const file = await openFile(filePath);
+
+  const typeLabel = file.fileType === 'root-meta'
+    ? 'ROOT file structure'
+    : 'particle physics dataset';
+
+  const prompt = `Please analyze this ${typeLabel}. Provide:
+1. What experiment and dataset type this appears to be
+2. Key physics observables present
+3. Notable features, anomalies, or interesting patterns
+4. Recommended next analysis steps (e.g., suggest /quantum if signal separation looks promising)`;
+
+  anthropicService.addContext({
+    processedFiles: [file.filename],
+  });
+
+  const result = await askQuestion(
+    prompt,
+    { file: file.fileType === 'json' ? filePath : undefined },
+    anthropicService.getContext(),
+    onToken,
+    signal
+  );
+
+  return { file, totalTokens: result.totalTokens };
+}

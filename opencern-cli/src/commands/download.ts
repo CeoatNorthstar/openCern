@@ -1,24 +1,44 @@
-// TODO: /download Command Handler
-//
-// Handles dataset discovery and download from CERN Open Data.
-//
-// Usage:
-//   /download                     → Interactive browser (search, filter, select)
-//   /download higgs               → Search for "higgs" datasets
-//   /download --save ~/mydata     → Download to custom location
-//   /download --id 12345          → Download specific dataset by ID
-//
-// Flow:
-//   1. Calls the OpenCERN API (/datasets/search) to browse available datasets
-//   2. Renders a searchable, scrollable DataTable of results
-//   3. User selects a dataset → shows file list with sizes
-//   4. User selects files to download (multi-select with Space, Enter to confirm)
-//   5. Starts download via API (/downloads/start)
-//   6. Shows ProgressBar with speed and ETA
-//   7. After download, auto-detects archives (.zip) and extracts ROOT files
-//   8. Updates session context so AI knows what was downloaded
-//
-// Edge cases:
-//   - Resume interrupted downloads
-//   - Handle XRootD protocol for large files
-//   - Show warning for very large datasets (>1GB)
+import { cernApi } from '../services/cern-api.js';
+import type { Dataset, DownloadStatus } from '../services/cern-api.js';
+
+export type { Dataset, DownloadStatus };
+
+export async function searchDatasets(
+  query: string,
+  experiment?: string,
+  year?: number
+): Promise<Dataset[]> {
+  return cernApi.searchDatasets(query, experiment, year);
+}
+
+export async function startDownload(
+  dataset: Dataset,
+  fileNames?: string[]
+): Promise<string> {
+  const result = await cernApi.startDownload(dataset.id, fileNames);
+  return result.id;
+}
+
+export async function pollDownload(
+  id: string,
+  onProgress: (status: DownloadStatus) => void
+): Promise<DownloadStatus> {
+  while (true) {
+    const status = await cernApi.downloadStatus(id);
+    onProgress(status);
+    if (status.status === 'complete' || status.status === 'error') {
+      return status;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
+export async function cancelDownload(id: string): Promise<void> {
+  await cernApi.cancelDownload(id);
+}
+
+export function formatDatasetSize(bytes: number): string {
+  if (bytes > 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes > 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
+  return `${(bytes / 1e3).toFixed(0)} KB`;
+}

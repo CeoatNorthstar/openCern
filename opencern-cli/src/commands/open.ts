@@ -1,24 +1,55 @@
-// TODO: /open Command Handler
-//
-// Opens and inspects ROOT or JSON files in the terminal.
-//
-// Usage:
-//   /open --root data.root     → Show ROOT file structure (trees, branches, entries)
-//   /open --json results.json  → Pretty-print processed JSON with syntax highlighting
-//   /open                      → Pick from local files interactively
-//
-// For ROOT files:
-//   - Calls the API to extract metadata (tree names, branch names, entry counts)
-//   - Shows a tree view of the ROOT file structure
-//   - Allows drilling into specific branches
-//
-// For JSON files:
-//   - Reads the processed event JSON
-//   - Renders with <FilePreview /> component
-//   - Shows event count, metadata summary at the top
-//   - Collapsible sections for events array
-//   - Searchable (Ctrl+F to find specific particle types, values)
-//
-// For any file:
-//   - Shows file stats: size, created, modified
-//   - Esc to close and return to prompt
+import { readFileSync, existsSync, statSync } from 'fs';
+import { cernApi } from '../services/cern-api.js';
+import type { LocalFile } from '../services/cern-api.js';
+
+export interface FileContent {
+  content: string;
+  filename: string;
+  size: number;
+  fileType: 'json' | 'text' | 'root-meta';
+}
+
+export async function openFile(filePath: string): Promise<FileContent> {
+  if (!existsSync(filePath)) {
+    throw new Error(`File not found: ${filePath}`);
+  }
+
+  const stat = statSync(filePath);
+  const filename = filePath.split('/').pop() || filePath;
+
+  if (filePath.endsWith('.root')) {
+    const meta = await cernApi.getRootMetadata(filePath);
+    return {
+      content: JSON.stringify(meta, null, 2),
+      filename,
+      size: stat.size,
+      fileType: 'root-meta',
+    };
+  }
+
+  if (filePath.endsWith('.json')) {
+    const raw = readFileSync(filePath, 'utf-8');
+    try {
+      const parsed = JSON.parse(raw);
+      return {
+        content: JSON.stringify(parsed, null, 2),
+        filename,
+        size: stat.size,
+        fileType: 'json',
+      };
+    } catch {
+      return { content: raw, filename, size: stat.size, fileType: 'text' };
+    }
+  }
+
+  return {
+    content: readFileSync(filePath, 'utf-8'),
+    filename,
+    size: stat.size,
+    fileType: 'text',
+  };
+}
+
+export async function listLocalFiles(): Promise<LocalFile[]> {
+  return cernApi.listFiles();
+}

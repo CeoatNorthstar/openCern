@@ -1,0 +1,16 @@
+{
+  "name": "@opencern/cli-auth-worker",
+  "version": "1.0.0",
+  "description": "CLI device-code auth flow Cloudflare Worker",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:production": "wrangler deploy --env production"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.0.0"
+  }
+}

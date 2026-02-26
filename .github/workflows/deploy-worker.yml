@@ -1,20 +1,20 @@
-name: Deploy Auth Worker
+name: Deploy Workers
 
 on:
   push:
     branches:
       - main
     paths:
-      - "workers/auth-system/**"
+      - "workers/**"
   workflow_dispatch:
 
 jobs:
-  deploy:
+  deploy-auth-system:
     runs-on: ubuntu-latest
-    name: Deploy
+    name: Deploy Auth System
     steps:
       - uses: actions/checkout@v4
-      - name: Build & Deploy Worker
+      - name: Build & Deploy Auth Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -26,3 +26,19 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
+
+  deploy-cli-auth:
+    runs-on: ubuntu-latest
+    name: Deploy CLI Auth
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Deploy CLI Auth Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: "workers/cli-auth"
+          secrets: |
+            JWT_SECRET
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
