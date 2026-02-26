@@ -305,6 +305,9 @@ export default function App() {
   const [aiMessages, setAiMessages] = useState([]);
   const [aiStreaming, setAiStreaming] = useState(false);
   const [aiTokens, setAiTokens] = useState('');
+  const [aiTotalTokens, setAiTotalTokens] = useState(0);
+  const [aiInputValue, setAiInputValue] = useState('');
+  const [aiShowSettings, setAiShowSettings] = useState(false);
   const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514', authMode: 'apikey', oauthToken: '', oauthExpiry: 0 });
   const [aiModels, setAiModels] = useState([]);
   const [aiError, setAiError] = useState('');
