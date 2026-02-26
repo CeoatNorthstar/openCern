@@ -177,6 +177,13 @@ if (!gotTheLock) {
       webPreferences: { nodeIntegration: true, contextIsolation: false },
     });
 
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
+    });
+
     splash.close();
     win.show();
     win.loadURL('http://localhost:3000');
