@@ -189,22 +189,6 @@ const AI_SUGGESTIONS = [
   'What cuts should I use for Z→μμ?',
 ];
 
-// OAuth PKCE helpers
-const CLAUDE_CLIENT_ID = '9d1d2e07-b4c2-49b2-8e0e-c27002455657';
-const CLAUDE_AUTH_URL = 'https://claude.ai/oauth/authorize';
-
-function generateCodeVerifier() {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-async function generateCodeChallenge(verifier) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
 
 // Simple markdown renderer for AI responses
 function renderAIMarkdown(text) {
@@ -307,15 +291,13 @@ export default function App() {
   const [aiTotalTokens, setAiTotalTokens] = useState(0);
   const [aiInputValue, setAiInputValue] = useState('');
   const [aiShowSettings, setAiShowSettings] = useState(false);
-  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514', authMode: 'apikey', oauthToken: '', oauthExpiry: 0 });
+  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-sonnet-4-20250514', authMode: 'apikey', sessionKey: '' });
   const [aiModels, setAiModels] = useState([]);
   const [aiError, setAiError] = useState('');
-  const [aiOAuthLoading, setAiOAuthLoading] = useState(false);
   const [aiSettingsTab, setAiSettingsTab] = useState('apikey');
   const aiMessagesEndRef = useRef(null);
   const aiAbortRef = useRef(null);
   const aiTextareaRef = useRef(null);
-  const oauthVerifierRef = useRef(null);
 
   // Load AI config from localStorage
   useEffect(() => {
@@ -328,49 +310,6 @@ export default function App() {
       }
     } catch {}
   }, []);
-
-  // Listen for OAuth callback result
-  useEffect(() => {
-    const handleStorage = async (e) => {
-      if (e.key !== 'opencern-oauth-result') return;
-      try {
-        const result = JSON.parse(e.newValue);
-        if (!result?.code || !oauthVerifierRef.current) return;
-
-        setAiOAuthLoading(true);
-        const redirectUri = `${window.location.origin}/oauth/callback`;
-        const res = await fetch('/api/ai/oauth/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: result.code,
-            codeVerifier: oauthVerifierRef.current,
-            redirectUri,
-          }),
-        });
-
-        if (!res.ok) throw new Error('Token exchange failed');
-        const tokens = await res.json();
-
-        const newConfig = {
-          ...aiConfig,
-          authMode: 'oauth',
-          oauthToken: tokens.access_token,
-          oauthExpiry: Date.now() + (tokens.expires_in || 3600) * 1000,
-          apiKey: '',
-        };
-        saveAiConfig(newConfig);
-        setAiOAuthLoading(false);
-        oauthVerifierRef.current = null;
-        localStorage.removeItem('opencern-oauth-result');
-      } catch (err) {
-        setAiError('OAuth connection failed. Try again.');
-        setAiOAuthLoading(false);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [aiConfig]);
 
   // Fetch models from Anthropic when API key changes
   const DEFAULT_MODELS = [
@@ -416,30 +355,10 @@ export default function App() {
     };
   }, [downloaded, inspectorData, selected]);
 
-  const isAiAuthed = aiConfig.authMode === 'oauth' ? !!aiConfig.oauthToken : !!aiConfig.apiKey;
+  const isAiAuthed = aiConfig.authMode === 'session' ? !!aiConfig.sessionKey : !!aiConfig.apiKey;
 
-  const startOAuth = useCallback(async () => {
-    const verifier = generateCodeVerifier();
-    oauthVerifierRef.current = verifier;
-    const challenge = await generateCodeChallenge(verifier);
-    const redirectUri = `${window.location.origin}/oauth/callback`;
-    const state = crypto.randomUUID();
-
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: CLAUDE_CLIENT_ID,
-      redirect_uri: redirectUri,
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      scope: 'user:inference',
-      state,
-    });
-
-    window.open(`${CLAUDE_AUTH_URL}?${params}`, '_blank', 'width=600,height=700');
-  }, []);
-
-  const disconnectOAuth = useCallback(() => {
-    saveAiConfig({ ...aiConfig, authMode: 'apikey', oauthToken: '', oauthExpiry: 0 });
+  const disconnectSession = useCallback(() => {
+    saveAiConfig({ ...aiConfig, authMode: 'apikey', sessionKey: '' });
   }, [aiConfig, saveAiConfig]);
 
   const sendAiMessage = useCallback(async (content) => {
@@ -468,8 +387,8 @@ export default function App() {
           messages: allMessages,
           systemPrompt,
           model: aiConfig.model,
-          apiKey: aiConfig.authMode === 'oauth' ? undefined : aiConfig.apiKey,
-          oauthToken: aiConfig.authMode === 'oauth' ? aiConfig.oauthToken : undefined,
+          apiKey: aiConfig.authMode === 'session' ? undefined : aiConfig.apiKey,
+          oauthToken: aiConfig.authMode === 'session' ? aiConfig.sessionKey : undefined,
         }),
         signal: aiAbortRef.current.signal,
       });
@@ -1924,14 +1843,14 @@ export default function App() {
 
                       {aiSettingsTab === 'oauth' && (
                         <div className="ai-chat-settings-group">
-                          <label>Claude Account</label>
-                          {aiConfig.authMode === 'oauth' && aiConfig.oauthToken ? (
+                          <label>Claude Session Token</label>
+                          {aiConfig.authMode === 'session' && aiConfig.sessionKey ? (
                             <div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', background: '#1a1a1e', borderRadius: '8px', border: '1px solid #2a2a2e' }}>
                                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80', flexShrink: 0 }}></div>
-                                <span style={{ color: '#999', fontSize: '13px', flex: 1 }}>Connected to Claude Pro/Max</span>
+                                <span style={{ color: '#999', fontSize: '13px', flex: 1 }}>Using Session Token</span>
                                 <button
-                                  onClick={disconnectOAuth}
+                                  onClick={disconnectSession}
                                   style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '12px' }}
                                   onMouseEnter={e => e.currentTarget.style.color = '#aaa'}
                                   onMouseLeave={e => e.currentTarget.style.color = '#666'}
@@ -1939,24 +1858,21 @@ export default function App() {
                                   Disconnect
                                 </button>
                               </div>
-                              <div className="ai-chat-hint">Uses your Claude Pro/Max subscription.</div>
+                              <div className="ai-chat-hint">Connected to your Claude account.</div>
                             </div>
                           ) : (
                             <div>
-                              <button
-                                onClick={startOAuth}
-                                disabled={aiOAuthLoading}
-                                style={{
-                                  width: '100%', padding: '11px', borderRadius: '8px', border: '1px solid #2a2a2e',
-                                  background: '#1a1a1e', color: '#ccc', fontSize: '13px', cursor: 'pointer',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                                }}
-                                onMouseEnter={e => { e.currentTarget.style.background = '#222'; e.currentTarget.style.borderColor = '#333'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = '#1a1a1e'; e.currentTarget.style.borderColor = '#2a2a2e'; }}
-                              >
-                                {aiOAuthLoading ? 'Connecting...' : 'Sign in with Claude'}
-                              </button>
-                              <div className="ai-chat-hint">Opens claude.ai to authorize. Requires Pro or Max plan.</div>
+                              <input
+                                className="ai-chat-settings-input"
+                                type="password"
+                                value={aiConfig.sessionKey || ''}
+                                onChange={(e) => setAiConfig(prev => ({ ...prev, sessionKey: e.target.value, authMode: 'session' }))}
+                                placeholder="sk-ant-sid01-..."
+                                autoComplete="off"
+                              />
+                              <div className="ai-chat-hint">
+                                Log into <a href="https://claude.ai" target="_blank" rel="noopener noreferrer">claude.ai</a>, copy your session-key cookie, and paste it here.
+                              </div>
                             </div>
                           )}
                         </div>
