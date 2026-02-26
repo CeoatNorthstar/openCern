@@ -309,8 +309,15 @@ export default function App() {
   }, []);
 
   // Fetch models from Anthropic when API key changes
+  const DEFAULT_MODELS = [
+    { id: 'claude-sonnet-4-20250514', display_name: 'Claude Sonnet 4' },
+    { id: 'claude-opus-4-20250514', display_name: 'Claude Opus 4' },
+    { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 3.5' },
+  ];
+
   useEffect(() => {
-    if (!aiConfig.apiKey) { setAiModels([]); return; }
+    if (!aiConfig.apiKey) { setAiModels(DEFAULT_MODELS); return; }
+    setAiModels(DEFAULT_MODELS); // show defaults immediately
     let cancelled = false;
     fetch(`/api/ai/models?apiKey=${encodeURIComponent(aiConfig.apiKey)}`)
       .then(r => r.ok ? r.json() : null)
@@ -1646,11 +1653,9 @@ export default function App() {
                             value={aiConfig.model}
                             onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
                           >
-                            {aiModels.length > 0 ? aiModels.map(m => (
+                            {aiModels.map(m => (
                               <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
-                            )) : (
-                              <option value={aiConfig.model}>{aiConfig.model.replace('claude-', 'Claude ').replace(/-\d{8}$/, '')}</option>
-                            )}
+                            ))}
                           </select>
                         </div>
                         <button
@@ -1749,11 +1754,9 @@ export default function App() {
                               value={aiConfig.model}
                               onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
                             >
-                              {aiModels.length > 0 ? aiModels.map(m => (
+                              {aiModels.map(m => (
                                 <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
-                              )) : (
-                                <option value={aiConfig.model}>{aiConfig.model.replace('claude-', 'Claude ').replace(/-\d{8}$/, '')}</option>
-                              )}
+                              ))}
                             </select>
                           </div>
                           <button
