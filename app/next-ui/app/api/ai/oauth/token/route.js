@@ -18,14 +18,14 @@ export async function POST(request) {
 
     const response = await fetch(CLAUDE_TOKEN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         grant_type: 'authorization_code',
         client_id: CLIENT_ID,
         code,
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
-      }).toString(),
+      }),
     });
 
     if (!response.ok) {
