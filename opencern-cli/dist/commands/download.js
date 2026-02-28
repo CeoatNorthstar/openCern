@@ -10,7 +10,7 @@ export async function searchDatasets(query, experiment, year) {
     return cernApi.searchDatasets(query, experiment, year);
 }
 export async function startDownload(dataset, fileNames) {
-    const result = await cernApi.startDownload(dataset.id, fileNames);
+    const result = await cernApi.startDownload(dataset, fileNames);
     return result.id;
 }
 export async function pollDownload(id, onProgress) {

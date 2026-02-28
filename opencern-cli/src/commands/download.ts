@@ -23,7 +23,7 @@ export async function startDownload(
   dataset: Dataset,
   fileNames?: string[]
 ): Promise<string> {
-  const result = await cernApi.startDownload(dataset.id, fileNames);
+  const result = await cernApi.startDownload(dataset, fileNames);
   return result.id;
 }
 

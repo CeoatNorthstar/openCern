@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 OpenCERN Contributors
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { getPrevious, getNext, resetCursor } from '../utils/history.js';
@@ -29,7 +29,7 @@ const COMMANDS = [
     { name: '/usage', description: 'Show session token usage stats' },
     { name: '/viz', description: 'Visualise a dataset' },
 ];
-export function Prompt({ onSubmit, disabled = false, placeholder }) {
+export function PromptComponent({ onSubmit, disabled = false, placeholder }) {
     const [value, setValue] = useState('');
     const [completionIndex, setCompletionIndex] = useState(0);
     const inCommandMode = value.startsWith('/');
@@ -85,5 +85,6 @@ export function Prompt({ onSubmit, disabled = false, placeholder }) {
                         return (_jsxs(Box, { flexDirection: "row", gap: 1, children: [selected ? _jsxs(Text, { bold: true, children: [" ", '>', " "] }) : _jsx(Text, { children: "   " }), selected ? (_jsxs(Text, { color: "black", backgroundColor: "white", bold: true, children: [" ", cmd.name.padEnd(10), " "] })) : (_jsxs(Text, { children: [" ", cmd.name.padEnd(10), " "] })), _jsx(Text, { dimColor: !selected, children: cmd.description })] }, cmd.name));
                     })] })), _jsxs(Box, { flexDirection: "row", alignItems: "center", children: [_jsx(Text, { bold: true, children: '> ' }), disabled ? (_jsx(Text, { dimColor: true, italic: true, children: placeholder || 'Processing...' })) : (_jsx(TextInput, { value: value, onChange: handleChange, onSubmit: handleSubmit, placeholder: placeholder || 'Ask anything or type / for commands...' }))] })] }));
 }
+export const Prompt = React.memo(PromptComponent);
 export default Prompt;
 //# sourceMappingURL=Prompt.js.map
