@@ -846,6 +846,14 @@ function App(): React.JSX.Element {
 
   const model = config.get('defaultModel');
 
+  // Stable reference for the prompt to prevent React Ink from re-rendering the whole tree
+  const handleInputRef = useRef(handleInput);
+  handleInputRef.current = handleInput;
+
+  const stableHandleInput = useCallback((raw: string) => {
+    handleInputRef.current(raw);
+  }, []);
+
   return (
     <Box 
       width={size.columns} 
@@ -959,7 +967,7 @@ function App(): React.JSX.Element {
       {/* Prompt anchored at bottom */}
       <Box paddingX={1} marginTop={1} borderStyle="round" paddingY={0}>
         <Prompt
-          onSubmit={handleInput}
+          onSubmit={stableHandleInput}
           disabled={promptDisabled}
           placeholder={promptDisabled ? (pendingTool ? 'Enter to approve, Esc to skip' : 'Processing... (Esc to cancel)') : undefined}
         />
