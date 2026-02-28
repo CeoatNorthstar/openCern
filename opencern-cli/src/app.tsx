@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useApp, useInput } from 'ink';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { render, Box, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 
 import { StatusBar } from './components/StatusBar.js';
@@ -9,7 +9,12 @@ import { AIStream } from './components/AIStream.js';
 import { ProgressBar } from './components/ProgressBar.js';
 import { FilePreview } from './components/FilePreview.js';
 import { QuantumPanel } from './components/QuantumPanel.js';
-import { DataTable } from './components/DataTable.js';
+import { Tips } from './components/Tips.js';
+import { ToastContainer, showToast } from './components/Toast.js';
+
+import { logo, tagline } from './tui/logo.js';
+import { getTheme } from './tui/theme.js';
+import { useTerminalSize } from './tui/hooks.js';
 
 import { config } from './utils/config.js';
 import { add as addHistory, getAll as getAllHistory } from './utils/history.js';
@@ -20,16 +25,21 @@ import { anthropicService } from './services/anthropic.js';
 import { getHelpText } from './commands/help.js';
 import { getSystemStatus, formatStatus } from './commands/status.js';
 import { runDoctorChecks, formatDoctorResults } from './commands/doctor.js';
-import { login, logout, getUsername } from './commands/auth.js';
+import { login, logout } from './commands/auth.js';
 import { showConfig, getConfigItems, setConfigValue, resetConfig } from './commands/config.js';
 import { checkForUpdates, updateDockerImages } from './commands/update.js';
 import { openFile } from './commands/open.js';
 import { openAndAsk } from './commands/opask.js';
 import { askQuestion } from './commands/ask.js';
-import { getSystemStatus as getStatus } from './commands/status.js';
 import { extractEvents, runClassification, ensureQuantumRunning } from './commands/quantum.js';
 import { openViz, renderASCII } from './commands/viz.js';
 import { quantumService } from './services/quantum.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Route = 'home' | 'session';
 
 type View =
   | 'home'
@@ -53,9 +63,11 @@ interface OutputLine {
   text: string;
   color?: string;
   bold?: boolean;
+  dim?: boolean;
 }
 
 interface AppState {
+  route: Route;
   view: View;
   output: OutputLine[];
   isLoading: boolean;
@@ -63,34 +75,373 @@ interface AppState {
   promptDisabled: boolean;
   showPalette: boolean;
   paletteQuery: string;
+
   // AI streaming
   aiTokens: string;
   aiStreaming: boolean;
   aiTokenCount?: number;
   aiLatency?: number;
+
   // File preview
   fileContent?: { content: string; filename: string; size: number; fileType: 'json' | 'text' | 'root-meta' };
+
   // Progress
   progress?: { label: string; percent: number; speed?: number; eta?: number; mode?: 'download' | 'process' | 'quantum' | 'upload' };
+
   // Quantum
   quantumJob?: import('./services/quantum.js').QuantumJob;
   quantumRunning: boolean;
   quantumBackend?: string;
   quantumCircuit?: string;
+
   // Login flow
   loginCode?: string;
   loginUrl?: string;
+
   // Config wizard
   configItems?: import('./commands/config.ts').ConfigItem[];
   configIndex: number;
   configValue: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Logo Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Logo(): React.JSX.Element {
+  const theme = getTheme();
+  return (
+    <Box flexDirection="column" alignItems="center">
+      {logo.left.map((line, i) => (
+        <Box key={i} flexDirection="row" gap={1}>
+          <Text color={theme.textMuted}>{line}</Text>
+          <Text color={theme.text} bold>{logo.right[i]}</Text>
+        </Box>
+      ))}
+      <Box marginTop={0}>
+        <Text color={theme.textMuted} dimColor>{tagline}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Home Route
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface HomeRouteProps {
+  onSubmit: (input: string) => void;
+  onSlash: () => void;
+  disabled: boolean;
+  showPalette: boolean;
+  paletteQuery: string;
+  onPaletteSelect: (command: string) => void;
+  onPaletteDismiss: () => void;
+  isFirstRun: boolean;
+}
+
+function HomeRoute({
+  onSubmit,
+  onSlash,
+  disabled,
+  showPalette,
+  paletteQuery,
+  onPaletteSelect,
+  onPaletteDismiss,
+  isFirstRun,
+}: HomeRouteProps): React.JSX.Element {
+  const theme = getTheme();
+  const model = config.get('defaultModel');
+  const shortModel = model?.replace('claude-', '').replace(/-\d{8}$/, '') || 'not set';
+  const provider = model?.includes('claude') ? 'anthropic' : '';
+
+  return (
+    <>
+      {/* Main content area - vertically centered */}
+      <Box flexGrow={1} flexDirection="column" alignItems="center" paddingLeft={2} paddingRight={2}>
+        {/* Top spacer */}
+        <Box flexGrow={1} minHeight={0} />
+
+        {/* Breathing room above logo */}
+        <Box height={2} minHeight={0} flexShrink={1} />
+
+        {/* Logo */}
+        <Box flexShrink={0}>
+          <Logo />
+        </Box>
+
+        {/* Space between logo and prompt */}
+        <Box height={2} minHeight={0} flexShrink={1} />
+
+        {/* First run message */}
+        {isFirstRun && (
+          <Box flexDirection="column" alignItems="center" marginBottom={1}>
+            <Text color={theme.info}>Welcome! Run /config to set up your API keys.</Text>
+          </Box>
+        )}
+
+        {/* Not authenticated hint */}
+        {!isFirstRun && !isAuthenticated() && (
+          <Box flexDirection="column" alignItems="center" marginBottom={1}>
+            <Text color={theme.textMuted}>
+              Run <Text color={theme.text}>/login</Text> to sign in
+            </Text>
+          </Box>
+        )}
+
+        {/* Prompt area */}
+        <Box width="100%" maxWidth={75} flexShrink={0}>
+          {showPalette ? (
+            <Box justifyContent="center">
+              <CommandPalette
+                query={paletteQuery}
+                onSelect={onPaletteSelect}
+                onDismiss={onPaletteDismiss}
+                width={60}
+              />
+            </Box>
+          ) : (
+            <Prompt
+              onSubmit={onSubmit}
+              onSlash={onSlash}
+              disabled={disabled}
+              placeholder={disabled ? 'Processing... (Esc to cancel)' : undefined}
+              agentName="Analyze"
+              modelName={shortModel}
+              providerName={provider}
+            />
+          )}
+        </Box>
+
+        {/* Tips area */}
+        <Box height={3} minHeight={0} width="100%" maxWidth={75} alignItems="center" paddingTop={1} flexShrink={1}>
+          {!isFirstRun && <Tips />}
+        </Box>
+
+        {/* Bottom spacer */}
+        <Box flexGrow={1} minHeight={0} />
+
+        {/* Toasts overlay */}
+        <ToastContainer />
+      </Box>
+
+      {/* Footer */}
+      <Box flexShrink={0} paddingTop={1} paddingBottom={1}>
+        <StatusBar />
+      </Box>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Route (active interaction)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SessionRouteProps {
+  state: AppState;
+  onSubmit: (input: string) => void;
+  onSlash: () => void;
+  onCancelStream: () => void;
+  onPaletteSelect: (command: string) => void;
+  onPaletteDismiss: () => void;
+  onCloseFile: () => void;
+}
+
+function SessionRoute({
+  state,
+  onSubmit,
+  onSlash,
+  onCancelStream,
+  onPaletteSelect,
+  onPaletteDismiss,
+  onCloseFile,
+}: SessionRouteProps): React.JSX.Element {
+  const theme = getTheme();
+  const model = config.get('defaultModel');
+  const shortModel = model?.replace('claude-', '').replace(/-\d{8}$/, '') || '';
+  const provider = model?.includes('claude') ? 'anthropic' : '';
+  const { rows } = useTerminalSize();
+
+  // Calculate available height for scrollable content
+  const headerHeight = 3;
+  const promptHeight = 6;
+  const footerHeight = 2;
+  const contentHeight = Math.max(rows - headerHeight - promptHeight - footerHeight, 5);
+
+  return (
+    <>
+      {/* Header */}
+      <Box
+        flexShrink={0}
+        paddingLeft={2}
+        paddingRight={2}
+        paddingTop={1}
+        paddingBottom={0}
+        flexDirection="row"
+        justifyContent="space-between"
+      >
+        <Box flexDirection="row" gap={1}>
+          <Text color={theme.primary} bold>┃</Text>
+          <Text color={theme.text} bold>
+            OpenCERN Session
+          </Text>
+        </Box>
+        <Box flexDirection="row" gap={2}>
+          {state.aiTokenCount !== undefined && (
+            <Text color={theme.textMuted}>{state.aiTokenCount.toLocaleString()} tokens</Text>
+          )}
+          {state.aiLatency !== undefined && (
+            <Text color={theme.textMuted}>{(state.aiLatency / 1000).toFixed(1)}s</Text>
+          )}
+        </Box>
+      </Box>
+
+      {/* Separator */}
+      <Box paddingX={2} flexShrink={0}>
+        <Text color={theme.borderSubtle}>{'─'.repeat(70)}</Text>
+      </Box>
+
+      {/* Scrollable content area */}
+      <Box
+        flexGrow={1}
+        flexDirection="column"
+        paddingX={2}
+        overflow="hidden"
+        height={contentHeight}
+      >
+        {/* Output lines */}
+        {state.output.slice(-(contentHeight - 2)).map((line, i) => (
+          <Text
+            key={i}
+            color={(line.color as never) || theme.text}
+            bold={line.bold}
+            dimColor={line.dim}
+          >
+            {line.text}
+          </Text>
+        ))}
+
+        {/* AI streaming view */}
+        {(state.view === 'ask' || state.view === 'opask') && (state.aiTokens || state.aiStreaming) && (
+          <Box flexDirection={state.view === 'opask' ? 'row' : 'column'}>
+            <Box flexDirection="column" flexGrow={1}>
+              <AIStream
+                tokens={state.aiTokens}
+                isStreaming={state.aiStreaming}
+                onCancel={onCancelStream}
+                model={model}
+                tokenCount={state.aiTokenCount}
+                latency={state.aiLatency}
+              />
+            </Box>
+            {state.view === 'opask' && state.fileContent && (
+              <Box flexDirection="column" flexGrow={1} marginLeft={2}>
+                <FilePreview
+                  content={state.fileContent.content}
+                  filename={state.fileContent.filename}
+                  size={state.fileContent.size}
+                  fileType={state.fileContent.fileType}
+                  focused={false}
+                />
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* File open view */}
+        {state.view === 'open' && state.fileContent && (
+          <FilePreview
+            content={state.fileContent.content}
+            filename={state.fileContent.filename}
+            size={state.fileContent.size}
+            fileType={state.fileContent.fileType}
+            onClose={onCloseFile}
+          />
+        )}
+
+        {/* Quantum view */}
+        {state.view === 'quantum' && (
+          <QuantumPanel
+            job={state.quantumJob}
+            isRunning={state.quantumRunning}
+            backend={state.quantumBackend}
+            circuitDiagram={state.quantumCircuit}
+          />
+        )}
+
+        {/* Progress bar */}
+        {state.progress && (
+          <ProgressBar
+            label={state.progress.label}
+            percent={state.progress.percent}
+            speed={state.progress.speed}
+            eta={state.progress.eta}
+            mode={state.progress.mode}
+          />
+        )}
+
+        {/* Loading indicator */}
+        {state.isLoading && (
+          <Box gap={1}>
+            <Text color={theme.primary}><Spinner type="dots" /></Text>
+            <Text color={theme.textMuted}>{state.loadingMsg}</Text>
+          </Box>
+        )}
+      </Box>
+
+      {/* Command palette overlay */}
+      {state.showPalette && (
+        <Box justifyContent="center" paddingX={2}>
+          <CommandPalette
+            query={state.paletteQuery}
+            onSelect={onPaletteSelect}
+            onDismiss={onPaletteDismiss}
+            width={60}
+          />
+        </Box>
+      )}
+
+      {/* Prompt */}
+      <Box paddingX={2} flexShrink={0}>
+        <Box width="100%">
+          <Prompt
+            onSubmit={onSubmit}
+            onSlash={onSlash}
+            disabled={state.promptDisabled}
+            placeholder={state.promptDisabled ? 'Processing... (Esc to cancel)' : undefined}
+            agentName="Analyze"
+            modelName={shortModel}
+            providerName={provider}
+            showHints={!state.showPalette}
+          />
+        </Box>
+      </Box>
+
+      {/* Footer */}
+      <Box flexShrink={0} paddingTop={0} paddingBottom={0}>
+        <StatusBar />
+      </Box>
+
+      {/* Toasts overlay */}
+      <ToastContainer />
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main App
+// ─────────────────────────────────────────────────────────────────────────────
+
 function App(): React.JSX.Element {
   const { exit } = useApp();
   const abortRef = useRef<AbortController | null>(null);
+  const { columns, rows } = useTerminalSize();
+  const theme = getTheme();
+
+  const [isFirstRun, setIsFirstRun] = useState(false);
 
   const [state, setState] = useState<AppState>({
+    route: 'home',
     view: 'home',
     output: [],
     isLoading: false,
@@ -105,11 +456,11 @@ function App(): React.JSX.Element {
     configValue: '',
   });
 
-  function addOutput(lines: string | string[], color?: string, bold?: boolean) {
+  function addOutput(lines: string | string[], color?: string, bold?: boolean, dim?: boolean) {
     const arr = Array.isArray(lines) ? lines : [lines];
     setState(s => ({
       ...s,
-      output: [...s.output, ...arr.map(text => ({ text, color, bold }))],
+      output: [...s.output, ...arr.map(text => ({ text, color, bold, dim }))],
     }));
   }
 
@@ -121,19 +472,24 @@ function App(): React.JSX.Element {
     setState(s => ({ ...s, isLoading: loading, loadingMsg: msg, promptDisabled: loading }));
   }
 
+  function goToSession() {
+    setState(s => ({ ...s, route: 'session' }));
+  }
+
   // Global keyboard shortcuts
   useInput((input, key) => {
-    // Ctrl+D = exit
     if (key.ctrl && input === 'd') {
       exit();
       return;
     }
-    // Ctrl+L = clear
     if (key.ctrl && input === 'l') {
       clearOutput();
       return;
     }
-    // Escape = cancel streaming / close overlay
+    if (key.ctrl && input === 'p') {
+      setState(s => ({ ...s, showPalette: !s.showPalette, paletteQuery: '' }));
+      return;
+    }
     if (key.escape) {
       if (state.showPalette) {
         setState(s => ({ ...s, showPalette: false, paletteQuery: '' }));
@@ -142,6 +498,10 @@ function App(): React.JSX.Element {
       if (state.aiStreaming) {
         abortRef.current?.abort();
         setState(s => ({ ...s, aiStreaming: false }));
+        return;
+      }
+      if (state.route === 'session' && state.view === 'home') {
+        // Already home, do nothing
         return;
       }
       if (state.view !== 'home') {
@@ -155,24 +515,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const firstRun = config.isFirstRun();
     config.load();
-
-    if (firstRun) {
-      addOutput([
-        '',
-        '  Welcome to OpenCERN CLI!',
-        '  AI-powered particle physics analysis.',
-        '',
-        '  Let\'s get you set up. Run /config to configure your API keys.',
-        '  Run /help to see all available commands.',
-        '',
-      ], 'cyan');
-    } else {
-      addOutput([
-        '',
-        '  OpenCERN CLI — type / for commands or ask a question',
-        '',
-      ], 'gray');
-    }
+    setIsFirstRun(firstRun);
 
     // Check Docker in background
     if (config.get('autoStartDocker')) {
@@ -181,20 +524,15 @@ function App(): React.JSX.Element {
         if (running) {
           const ready = await docker.isApiReady();
           if (!ready) {
-            addOutput('  Starting OpenCERN containers...', 'gray');
             try {
               await docker.startContainers();
-              addOutput('  Containers started.', 'green');
-            } catch (err) {
-              addOutput(`  Could not start containers: ${(err as Error).message}`, 'yellow');
+              showToast('Containers started', 'success');
+            } catch {
+              // Silent fail on startup
             }
           }
         }
       })();
-    }
-
-    if (!isAuthenticated()) {
-      addOutput('  Tip: Run /login to sign in and unlock all features.', 'yellow');
     }
   }, []);
 
@@ -207,17 +545,27 @@ function App(): React.JSX.Element {
     setState(s => ({ ...s, showPalette: true, paletteQuery: '/' }));
   }, []);
 
+  const handlePaletteDismiss = useCallback(() => {
+    setState(s => ({ ...s, showPalette: false, paletteQuery: '' }));
+  }, []);
+
+  // ─── Command Handler ───────────────────────────────────────────────────────
+
   async function handleInput(raw: string) {
     const input = raw.trim();
     if (!input) return;
 
     addHistory(input);
 
-    // Parse command and args
     const parts = input.split(/\s+/);
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1);
     const argStr = args.join(' ');
+
+    // Switch to session route for any command
+    if (state.route === 'home' && cmd !== '/exit' && cmd !== 'exit' && cmd !== 'quit') {
+      goToSession();
+    }
 
     switch (cmd) {
       case '/exit':
@@ -237,10 +585,14 @@ function App(): React.JSX.Element {
         addOutput(getHelpText());
         return;
 
+      case '/home':
+        setState(s => ({ ...s, route: 'home', view: 'home', output: [], aiTokens: '', fileContent: undefined }));
+        return;
+
       case '/history': {
         const hist = getAllHistory().slice(0, 20);
-        addOutput(['', '  Recent commands:']);
-        hist.forEach((entry, i) => addOutput(`  ${String(i + 1).padStart(3)}. ${entry.command}`, 'gray'));
+        addOutput(['', '  Recent commands:', '']);
+        hist.forEach((entry, i) => addOutput(`  ${String(i + 1).padStart(3)}. ${entry.command}`, theme.textMuted));
         addOutput('');
         return;
       }
@@ -254,7 +606,7 @@ function App(): React.JSX.Element {
           addOutput(formatStatus(status));
         } catch (err) {
           setLoading(false);
-          addOutput(`  Error: ${(err as Error).message}`, 'red');
+          addOutput(`  ✗ ${(err as Error).message}`, theme.error);
         }
         return;
       }
@@ -268,7 +620,7 @@ function App(): React.JSX.Element {
           addOutput(formatDoctorResults(checks));
         } catch (err) {
           setLoading(false);
-          addOutput(`  Error: ${(err as Error).message}`, 'red');
+          addOutput(`  ✗ ${(err as Error).message}`, theme.error);
         }
         return;
       }
@@ -280,16 +632,19 @@ function App(): React.JSX.Element {
         }
         if (args.includes('--reset')) {
           resetConfig();
-          addOutput('  Configuration reset to defaults.', 'green');
+          showToast('Configuration reset to defaults', 'success');
           return;
         }
-        // Interactive wizard
         const items = getConfigItems();
         setState(s => ({ ...s, view: 'config-wizard', configItems: items, configIndex: 0, configValue: '' }));
-        addOutput(['', '  Configuration Wizard', '  ─────────────────────────────────────']);
-        addOutput(`  ${items[0].label}: ${items[0].description}`, 'cyan');
-        addOutput(`  Current: ${items[0].current || 'Not set'}`, 'gray');
-        addOutput(`  Enter new value (or press Enter to keep current):`, 'gray');
+        addOutput([
+          '',
+          '  Configuration Wizard',
+          '  ─────────────────────────────────────',
+        ]);
+        addOutput(`  ${items[0].label}: ${items[0].description}`, theme.info);
+        addOutput(`  Current: ${items[0].current || 'Not set'}`, theme.textMuted);
+        addOutput('  Enter new value (or press Enter to keep current):');
         addOutput('');
         return;
       }
@@ -297,7 +652,6 @@ function App(): React.JSX.Element {
       case '/login': {
         setState(s => ({ ...s, view: 'login' }));
         setLoading(true, 'Initializing login...');
-
         try {
           const result = await login(
             (code: string, url: string) => {
@@ -305,7 +659,7 @@ function App(): React.JSX.Element {
               addOutput([
                 '',
                 '  Opening browser for authentication...',
-                `  If it doesn\'t open, visit: ${url}`,
+                `  If it doesn't open, visit: ${url}`,
                 '',
                 `  Your code: ${code}`,
                 '',
@@ -316,20 +670,20 @@ function App(): React.JSX.Element {
               setState(s => ({ ...s, isLoading: true, loadingMsg: 'Waiting for authorization...' }));
             }
           );
-
           setLoading(false);
           if (result.success) {
+            showToast(`Signed in${result.username ? ` as ${result.username}` : ''}`, 'success');
             addOutput([
               `  ✓ Signed in${result.username ? ` as ${result.username}` : ''}`,
               '  ✓ Token stored in system keychain',
               '',
-            ], 'green');
+            ], theme.success);
           } else {
-            addOutput(`  ✗ Login failed: ${result.error}`, 'red');
+            showToast(`Login failed: ${result.error}`, 'error');
           }
         } catch (err) {
           setLoading(false);
-          addOutput(`  ✗ Login error: ${(err as Error).message}`, 'red');
+          showToast(`Login error: ${(err as Error).message}`, 'error');
         }
         setState(s => ({ ...s, view: 'home' }));
         return;
@@ -338,9 +692,9 @@ function App(): React.JSX.Element {
       case '/logout': {
         try {
           await logout();
-          addOutput('  ✓ Signed out successfully.', 'green');
+          showToast('Signed out successfully', 'success');
         } catch (err) {
-          addOutput(`  ✗ Logout error: ${(err as Error).message}`, 'red');
+          showToast(`Logout error: ${(err as Error).message}`, 'error');
         }
         return;
       }
@@ -354,21 +708,19 @@ function App(): React.JSX.Element {
             addOutput([
               `  Update available: v${info.currentVersion} → v${info.latestVersion}`,
               '  Run: npm install -g @opencern/cli',
-              '',
-              '  Pulling latest Docker images...',
-            ], 'cyan');
+            ], theme.info);
             setLoading(true, 'Pulling Docker images...');
             await updateDockerImages(img => {
               setState(s => ({ ...s, loadingMsg: `Pulling ${img}...` }));
             });
             setLoading(false);
-            addOutput('  ✓ Docker images updated.', 'green');
+            showToast('Docker images updated', 'success');
           } else {
-            addOutput(`  ✓ Already up to date (v${info.currentVersion}).`, 'green');
+            showToast(`Already up to date (v${info.currentVersion})`, 'info');
           }
         } catch (err) {
           setLoading(false);
-          addOutput(`  ✗ Update error: ${(err as Error).message}`, 'red');
+          showToast(`Update error: ${(err as Error).message}`, 'error');
         }
         return;
       }
@@ -376,7 +728,7 @@ function App(): React.JSX.Element {
       case '/open': {
         const fileArg = argStr.replace('--json', '').replace('--root', '').trim();
         if (!fileArg) {
-          addOutput('  Usage: /open <file.json|file.root>', 'yellow');
+          addOutput('  Usage: /open <file.json|file.root>', theme.warning);
           return;
         }
         setLoading(true, `Opening ${fileArg}...`);
@@ -386,7 +738,7 @@ function App(): React.JSX.Element {
           setState(s => ({ ...s, view: 'open', fileContent }));
         } catch (err) {
           setLoading(false);
-          addOutput(`  ✗ ${(err as Error).message}`, 'red');
+          addOutput(`  ✗ ${(err as Error).message}`, theme.error);
         }
         return;
       }
@@ -394,7 +746,7 @@ function App(): React.JSX.Element {
       case '/opask': {
         const fileArg = argStr.trim();
         if (!fileArg) {
-          addOutput('  Usage: /opask <file.json>', 'yellow');
+          addOutput('  Usage: /opask <file.json>', theme.warning);
           return;
         }
         setState(s => ({ ...s, view: 'opask', aiTokens: '', aiStreaming: true }));
@@ -414,7 +766,7 @@ function App(): React.JSX.Element {
           }));
         } catch (err) {
           setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
-          addOutput(`  ✗ ${(err as Error).message}`, 'red');
+          addOutput(`  ✗ ${(err as Error).message}`, theme.error);
         }
         return;
       }
@@ -429,7 +781,6 @@ function App(): React.JSX.Element {
         setState(s => ({ ...s, view: 'ask', aiTokens: '', aiStreaming: true, promptDisabled: true }));
         abortRef.current = new AbortController();
         const start = Date.now();
-
         try {
           const { totalTokens } = await askQuestion(
             cleanQuestion || question,
@@ -448,9 +799,9 @@ function App(): React.JSX.Element {
         } catch (err) {
           setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
           if ((err as Error).message.includes('API key')) {
-            addOutput('  ✗ Anthropic API key not set. Run /config to configure.', 'red');
+            showToast('Anthropic API key not set. Run /config', 'warning');
           } else {
-            addOutput(`  ✗ ${(err as Error).message}`, 'red');
+            addOutput(`  ✗ ${(err as Error).message}`, theme.error);
           }
         }
         return;
@@ -462,20 +813,20 @@ function App(): React.JSX.Element {
 
         if (subCmd === 'status') {
           setLoading(true, 'Checking quantum backend...');
-          const status = await quantumService.getStatus();
+          const qStatus = await quantumService.getStatus();
           setLoading(false);
           addOutput([
             '',
-            `  Quantum backend: ${status.backend}`,
-            `  Status: ${status.healthy ? 'healthy' : 'offline'}`,
+            `  Quantum backend: ${qStatus.backend}`,
+            `  Status: ${qStatus.healthy ? 'healthy' : 'offline'}`,
             '',
-          ], status.healthy ? 'green' : 'yellow');
+          ], qStatus.healthy ? theme.success : theme.warning);
           return;
         }
 
         const targetFile = fileArg || '';
         if (!targetFile) {
-          addOutput('  Usage: /quantum classify <file.json>', 'yellow');
+          addOutput('  Usage: /quantum classify <file.json>', theme.warning);
           return;
         }
 
@@ -486,13 +837,13 @@ function App(): React.JSX.Element {
         if (!qReady) {
           setLoading(false);
           setState(s => ({ ...s, quantumRunning: false }));
-          addOutput('  ✗ Quantum container not available. Ensure Docker is running.', 'red');
+          showToast('Quantum container not available. Ensure Docker is running.', 'error');
           return;
         }
 
         try {
           const events = extractEvents(targetFile);
-          addOutput(`  Extracted ${events.length} events from ${targetFile}`, 'gray');
+          addOutput(`  Extracted ${events.length} events from ${targetFile}`, theme.textMuted);
 
           const circuit = await quantumService.getCircuitDiagram(4, 6);
           setState(s => ({ ...s, quantumCircuit: circuit, quantumBackend: config.get('quantumBackend') }));
@@ -506,19 +857,19 @@ function App(): React.JSX.Element {
           setState(s => ({ ...s, quantumRunning: false, quantumJob: finalJob }));
 
           if (finalJob.results) {
+            showToast('Quantum classification complete!', 'success');
             addOutput([
               '',
-              `  Quantum classification complete!`,
               `  Signal events: ${finalJob.results.signalCount} (${(finalJob.results.signalProbability * 100).toFixed(1)}%)`,
               `  Background: ${finalJob.results.backgroundCount}`,
               `  Fidelity: ${finalJob.results.fidelity.toFixed(3)}`,
               '',
-            ], 'green');
+            ], theme.success);
           }
         } catch (err) {
           setLoading(false);
           setState(s => ({ ...s, quantumRunning: false }));
-          addOutput(`  ✗ ${(err as Error).message}`, 'red');
+          addOutput(`  ✗ ${(err as Error).message}`, theme.error);
         }
         return;
       }
@@ -528,12 +879,12 @@ function App(): React.JSX.Element {
         const forceBrowser = args.includes('--browser');
 
         if (!fileArg) {
-          addOutput('  Usage: /viz <file.json>', 'yellow');
+          addOutput('  Usage: /viz <file.json>', theme.warning);
           return;
         }
 
         const result = openViz(fileArg, forceBrowser);
-        addOutput(`  ${result.message}`, result.method === 'ascii' ? 'yellow' : 'green');
+        addOutput(`  ${result.message}`, result.method === 'ascii' ? theme.warning : theme.success);
 
         if (result.method === 'ascii') {
           addOutput(renderASCII(fileArg));
@@ -551,7 +902,7 @@ function App(): React.JSX.Element {
           '',
           '  Note: Connect to the API with /status, then retry.',
           '',
-        ], 'yellow');
+        ], theme.warning);
         return;
       }
 
@@ -563,7 +914,7 @@ function App(): React.JSX.Element {
           '  Requires the OpenCERN API container to be running.',
           '  Start it with Docker, then retry.',
           '',
-        ], 'yellow');
+        ], theme.warning);
         return;
       }
 
@@ -591,147 +942,93 @@ function App(): React.JSX.Element {
           } catch (err) {
             setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
             if ((err as Error).message.includes('API key')) {
-              addOutput([
-                '  No Anthropic API key configured.',
-                '  Run /config to set it up, then ask your question again.',
-              ], 'yellow');
+              showToast('No API key configured. Run /config to set it up.', 'warning');
             } else {
-              addOutput(`  ✗ ${(err as Error).message}`, 'red');
+              addOutput(`  ✗ ${(err as Error).message}`, theme.error);
             }
           }
           return;
         }
 
-        addOutput(`  Unknown command: ${cmd}. Type /help for available commands.`, 'yellow');
+        addOutput(`  Unknown command: ${cmd}. Type /help for available commands.`, theme.warning);
         return;
       }
     }
   }
 
-  const { output, isLoading, loadingMsg, showPalette, paletteQuery, view,
-    aiTokens, aiStreaming, aiTokenCount, aiLatency,
-    fileContent, progress, quantumJob, quantumRunning, quantumBackend, quantumCircuit,
-    promptDisabled } = state;
+  const handleCancelStream = useCallback(() => {
+    abortRef.current?.abort();
+    setState(s => ({ ...s, aiStreaming: false }));
+  }, []);
 
-  const model = config.get('defaultModel');
+  const handleCloseFile = useCallback(() => {
+    setState(s => ({ ...s, view: 'home', fileContent: undefined }));
+  }, []);
+
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <Box flexDirection="column" padding={0}>
-      <StatusBar />
-
-      {/* Output area */}
-      <Box flexDirection="column" paddingX={1} marginY={0} minHeight={3}>
-        {output.slice(-30).map((line, i) => (
-          <Text
-            key={i}
-            color={(line.color as never) || 'white'}
-            bold={line.bold}
-          >
-            {line.text}
-          </Text>
-        ))}
-      </Box>
-
-      {/* AI streaming view */}
-      {(view === 'ask' || view === 'opask') && (aiTokens || aiStreaming) && (
-        <Box flexDirection={view === 'opask' ? 'row' : 'column'} paddingX={1}>
-          <Box flexDirection="column" flexGrow={1}>
-            <AIStream
-              tokens={aiTokens}
-              isStreaming={aiStreaming}
-              onCancel={() => { abortRef.current?.abort(); setState(s => ({ ...s, aiStreaming: false })); }}
-              model={model}
-              tokenCount={aiTokenCount}
-              latency={aiLatency}
-            />
-          </Box>
-          {view === 'opask' && fileContent && (
-            <Box flexDirection="column" flexGrow={1} marginLeft={2}>
-              <FilePreview
-                content={fileContent.content}
-                filename={fileContent.filename}
-                size={fileContent.size}
-                fileType={fileContent.fileType}
-                focused={false}
-              />
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {/* File open view */}
-      {view === 'open' && fileContent && (
-        <Box paddingX={1}>
-          <FilePreview
-            content={fileContent.content}
-            filename={fileContent.filename}
-            size={fileContent.size}
-            fileType={fileContent.fileType}
-            onClose={() => setState(s => ({ ...s, view: 'home', fileContent: undefined }))}
-          />
-        </Box>
-      )}
-
-      {/* Quantum view */}
-      {view === 'quantum' && (
-        <Box paddingX={1}>
-          <QuantumPanel
-            job={quantumJob}
-            isRunning={quantumRunning}
-            backend={quantumBackend}
-            circuitDiagram={quantumCircuit}
-          />
-        </Box>
-      )}
-
-      {/* Progress bar */}
-      {progress && (
-        <Box paddingX={1}>
-          <ProgressBar
-            label={progress.label}
-            percent={progress.percent}
-            speed={progress.speed}
-            eta={progress.eta}
-            mode={progress.mode}
-          />
-        </Box>
-      )}
-
-      {/* Loading indicator */}
-      {isLoading && (
-        <Box paddingX={1}>
-          <Text color="blue"><Spinner type="dots" /></Text>
-          <Text color="gray">  {loadingMsg}</Text>
-        </Box>
-      )}
-
-      {/* Command palette */}
-      {showPalette && (
-        <Box paddingX={1}>
-          <CommandPalette
-            query={paletteQuery}
-            onSelect={handlePaletteSelect}
-            onDismiss={() => setState(s => ({ ...s, showPalette: false, paletteQuery: '' }))}
-          />
-        </Box>
-      )}
-
-      {/* Prompt */}
-      <Box paddingX={1} marginTop={0}>
-        <Prompt
+    <Box
+      width={columns}
+      height={rows}
+      flexDirection="column"
+      overflow="hidden"
+    >
+      {state.route === 'home' ? (
+        <HomeRoute
           onSubmit={handleInput}
           onSlash={handleSlash}
-          disabled={promptDisabled}
-          placeholder={promptDisabled ? 'Processing... (Esc to cancel)' : undefined}
+          disabled={state.promptDisabled}
+          showPalette={state.showPalette}
+          paletteQuery={state.paletteQuery}
+          onPaletteSelect={handlePaletteSelect}
+          onPaletteDismiss={handlePaletteDismiss}
+          isFirstRun={isFirstRun}
         />
-      </Box>
+      ) : (
+        <SessionRoute
+          state={state}
+          onSubmit={handleInput}
+          onSlash={handleSlash}
+          onCancelStream={handleCancelStream}
+          onPaletteSelect={handlePaletteSelect}
+          onPaletteDismiss={handlePaletteDismiss}
+          onCloseFile={handleCloseFile}
+        />
+      )}
     </Box>
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function startApp(): Promise<void> {
-  const { waitUntilExit } = render(<App />);
-  await waitUntilExit();
+  // Enter alternate screen buffer (like vim, htop)
+  process.stdout.write('\x1b[?1049h');
+  // Clear screen
+  process.stdout.write('\x1b[2J\x1b[H');
+
+  const cleanup = () => {
+    // Exit alternate screen buffer (restores previous terminal content)
+    process.stdout.write('\x1b[?1049l');
+  };
+
+  // Ensure cleanup on various exit signals
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => { cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+
+  try {
+    const { waitUntilExit } = render(<App />, {
+      exitOnCtrlC: false,
+      patchConsole: true,
+    });
+    await waitUntilExit();
+  } finally {
+    cleanup();
+  }
 }
 
 export default App;

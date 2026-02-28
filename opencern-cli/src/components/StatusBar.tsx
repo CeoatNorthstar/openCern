@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { docker } from '../services/docker.js';
 import { config } from '../utils/config.js';
 import { isAuthenticated } from '../utils/auth.js';
+import { getTheme } from '../tui/theme.js';
 
 interface StatusState {
   dockerRunning: boolean;
@@ -13,6 +14,7 @@ interface StatusState {
 }
 
 export function StatusBar(): React.JSX.Element {
+  const theme = getTheme();
   const [status, setStatus] = useState<StatusState>({
     dockerRunning: false,
     apiReady: false,
@@ -31,46 +33,62 @@ export function StatusBar(): React.JSX.Element {
 
   useEffect(() => {
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    const interval = setInterval(checkStatus, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const model = config.get('defaultModel');
-  const shortModel = model.replace('claude-', '').replace(/-4-\d.*/, ' 4.x');
-
-  const dockerColor = status.checking ? 'yellow' : status.dockerRunning ? 'green' : 'red';
-  const dockerLabel = status.checking ? '...' : status.dockerRunning ? '✓' : '✗';
-
-  const apiColor = status.checking ? 'yellow' : status.apiReady ? 'green' : 'red';
-  const apiLabel = status.checking ? '...' : status.apiReady ? '✓' : '✗';
-
-  const quantumLabel = status.quantumReady ? config.get('quantumBackend') : 'offline';
-  const quantumColor = status.quantumReady ? 'green' : 'gray';
-
-  const authLabel = status.authStatus ? 'signed in' : 'not signed in';
-  const authColor = status.authStatus ? 'green' : 'yellow';
+  const dataDir = config.get('dataDir') || '~/opencern-datasets';
+  const shortDir = dataDir.replace(process.env.HOME || '', '~');
 
   return (
     <Box
-      borderStyle="single"
-      borderColor="gray"
-      paddingX={1}
+      paddingLeft={2}
+      paddingRight={2}
+      paddingTop={0}
+      paddingBottom={0}
       flexDirection="row"
       justifyContent="space-between"
+      flexShrink={0}
     >
-      <Box gap={1}>
-        <Text bold color="cyan">opencern</Text>
-        <Text color="gray">│</Text>
-        <Text color={dockerColor}>Docker {dockerLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={apiColor}>API {apiLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={quantumColor}>Quantum: {quantumLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={authColor}>{authLabel}</Text>
-      </Box>
-      <Box>
-        <Text color="gray" dimColor>{shortModel}</Text>
+      {/* Left: directory */}
+      <Text color={theme.textMuted}>{shortDir}</Text>
+
+      {/* Right: status indicators */}
+      <Box gap={2} flexDirection="row" flexShrink={0}>
+        {/* Docker status */}
+        <Text color={theme.text}>
+          <Text color={status.checking ? theme.textMuted : status.dockerRunning ? theme.success : theme.error}>
+            {'● '}
+          </Text>
+          Docker
+        </Text>
+
+        {/* API status */}
+        <Text color={theme.text}>
+          <Text color={status.checking ? theme.textMuted : status.apiReady ? theme.success : theme.error}>
+            {'● '}
+          </Text>
+          API
+        </Text>
+
+        {/* Quantum status */}
+        {status.quantumReady && (
+          <Text color={theme.text}>
+            <Text color={theme.success}>{'● '}</Text>
+            Quantum
+          </Text>
+        )}
+
+        {/* Auth */}
+        {status.authStatus && (
+          <Text color={theme.text}>
+            <Text color={theme.success}>{'● '}</Text>
+            Auth
+          </Text>
+        )}
+
+        {/* Separator + Version */}
+        <Text color={theme.textMuted}>v1.0.0-beta.1</Text>
       </Box>
     </Box>
   );
