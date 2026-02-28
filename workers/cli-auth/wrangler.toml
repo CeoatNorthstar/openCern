@@ -1,11 +1,7 @@
+
 name = "opencern-cli-auth"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
-
-# Routes — auth.opencern.io
-routes = [
-  { pattern = "auth.opencern.io/auth/cli/*", zone_name = "opencern.io" }
-]
 
 # KV namespace for auth codes
 [[kv_namespaces]]
@@ -17,7 +13,3 @@ preview_id = "61434a385d3a4ec59bb5f823b5059586"
 [vars]
 # JWT_SECRET is set as a secret: wrangler secret put JWT_SECRET
 
-[env.production]
-routes = [
-  { pattern = "auth.opencern.io/auth/cli/*", zone_name = "opencern.io" }
-]
