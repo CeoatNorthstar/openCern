@@ -139,7 +139,7 @@ export const cernApi = {
   },
 
   async downloadStatus(id: string): Promise<DownloadStatus> {
-    const res = await createClient().get('/download/status', { params: { folder: id } });
+    const res = await createClient().get('/download/status', { params: { filename: id } });
     return res.data;
   },
 

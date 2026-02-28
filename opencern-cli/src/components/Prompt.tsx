@@ -98,7 +98,7 @@ export function PromptComponent({ onSubmit, disabled = false, placeholder }: Pro
   const visibleCompletions = completions.slice(0, 6);
 
   return (
-    <Box flexDirection="column" width="100%">
+    <Box flexDirection="column" width="100%" minHeight={11} justifyContent="flex-end">
       {showCompletions && (
         <Box 
           flexDirection="column" 
