@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 import { execSync } from 'child_process';
 import axios from 'axios';
 import { docker } from '../services/docker.js';

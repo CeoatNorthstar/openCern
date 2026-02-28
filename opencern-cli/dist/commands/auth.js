@@ -1,8 +1,15 @@
+/**
+ * Copyright (c) 2026 OpenCERN. All Rights Reserved.
+ *
+ * PROPRIETARY AND CONFIDENTIAL — Enterprise Component
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ * See LICENSE.enterprise for full terms.
+ */
 import { execSync } from 'child_process';
 import { platform } from 'os';
 import axios from 'axios';
 import { setKey, deleteKey, getKey } from '../utils/keystore.js';
-const CLI_AUTH_BASE = 'https://auth.opencern.io';
+const CLI_AUTH_BASE = 'https://opencern-cli-auth.a-contactnaol.workers.dev';
 function openBrowser(url) {
     const p = platform();
     try {
@@ -28,7 +35,7 @@ export async function login(onCode, onWaiting) {
         };
     }
     const { code } = initResult;
-    const authUrl = `https://app.opencern.io/auth/cli?code=${code}`;
+    const authUrl = `${CLI_AUTH_BASE}/auth/cli?code=${code}`;
     openBrowser(authUrl);
     onCode(code, authUrl);
     onWaiting();

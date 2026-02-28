@@ -1,4 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 import { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 function renderRootMeta(content) {

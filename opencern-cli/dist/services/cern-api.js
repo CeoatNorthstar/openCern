@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) 2026 OpenCERN. All Rights Reserved.
+ *
+ * PROPRIETARY AND CONFIDENTIAL — Enterprise Component
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ * See LICENSE.enterprise for full terms.
+ */
 import axios, { AxiosError } from 'axios';
 import { config } from '../utils/config.js';
 import { getToken } from '../utils/auth.js';

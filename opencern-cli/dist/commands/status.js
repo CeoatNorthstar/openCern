@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 import { docker } from '../services/docker.js';
 import { cernApi } from '../services/cern-api.js';
 import { config } from '../utils/config.js';
