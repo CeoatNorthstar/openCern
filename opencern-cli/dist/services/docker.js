@@ -138,7 +138,7 @@ export const docker = {
             execSync(`docker pull ${image}`, { stdio: 'inherit' });
         }
     },
-    async startContainers(includeQuantum = false) {
+    async startContainers(includeQuantum = true) {
         ensureComposeFile(includeQuantum);
         execSync(`docker compose -f ${COMPOSE_FILE} up -d`, { stdio: 'inherit' });
     },
