@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useApp, useInput } from 'ink';
+import { render, Box, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 
 import { StatusBar } from './components/StatusBar.js';
@@ -113,6 +113,19 @@ function App(): React.JSX.Element {
     configValue: '',
   });
 
+  // Fullscreen responsive sizing
+  const { stdout } = useStdout();
+  const [size, setSize] = useState({ 
+    columns: stdout.columns || 80, 
+    rows: stdout.rows || 24 
+  });
+
+  useEffect(() => {
+    const onResize = () => setSize({ columns: stdout.columns, rows: stdout.rows });
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
+
   function addOutput(lines: string | string[], color?: string, bold?: boolean) {
     const arr = Array.isArray(lines) ? lines : [lines];
     setState(s => ({
@@ -188,20 +201,31 @@ function App(): React.JSX.Element {
 
     if (firstRun) {
       addOutput([
-        ...getBannerText(),
-        '  Welcome to OpenCERN CLI',
-        '  AI-powered particle physics analysis',
+        '   _____                 _____________  _   __',
+        '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+        ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+        ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+        '     /_/                                              ',
+        '',
+        '  Welcome to OpenCERN CLI — Autonomous Mode',
+        '  AI-powered particle physics analysis and quantum computing',
         '',
         '  Run /config to configure your API keys.',
         '  Run /help to see all available commands.',
         '',
-      ], 'cyan');
+      ], undefined, true);
     } else {
       addOutput([
+        '   _____                 _____________  _   __',
+        '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+        ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+        ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+        '     /_/                                              ',
         '',
-        '  opencern -- type / for commands or ask a question',
+        '  OpenCERN Engine Ready — Autonomous Mode',
+        '  Type / for commands or ask a physics question',
         '',
-      ], 'gray');
+      ], undefined, true);
     }
 
     // Check Docker in background
@@ -209,6 +233,27 @@ function App(): React.JSX.Element {
       (async () => {
         const running = docker.isDockerRunning();
         if (running) {
+          const present = docker.areImagesPresent();
+          if (!present) {
+             addOutput('  missing required engine images. pulling from GHCR (this may take a minute)...', 'cyan');
+             try {
+                await docker.pullImages();
+                addOutput('  [+] engine downloaded successfully', 'green');
+             } catch (err) {
+                addOutput(`  [-] failed to pull engine: ${(err as Error).message}`, 'red');
+                return;
+             }
+          } else {
+             // Check for updates asynchronously
+             docker.checkForUpdates().then(hasUpdate => {
+                 if (hasUpdate) {
+                     addOutput('', 'gray');
+                     addOutput('  [*] An update is available for the OpenCERN engine!', 'cyan', true);
+                     addOutput('      Run "/update" to download the latest version.', 'cyan');
+                 }
+             }).catch(() => {});
+          }
+
           const ready = await docker.isApiReady();
           if (!ready) {
             addOutput('  starting containers...', 'gray');
@@ -219,6 +264,8 @@ function App(): React.JSX.Element {
               addOutput(`  [-] could not start containers: ${(err as Error).message}`, 'yellow');
             }
           }
+        } else {
+            addOutput('  [!] Docker Desktop is not running. Core features will be disabled.', 'yellow');
         }
       })();
     }
@@ -679,28 +726,102 @@ function App(): React.JSX.Element {
       }
 
       case '/download': {
-        addOutput([
-          '',
-          '  /download -- CERN Open Data',
-          '  ────────────────────────────────────────',
-          '  requires the OpenCERN API container.',
-          `  searching for: "${argStr || 'all datasets'}"`,
-          '',
-          '  check /status, then retry.',
-          '',
-        ], 'yellow');
+        const query = argStr.trim();
+        
+        if (!query) {
+          setLoading(true, 'fetching available datasets...');
+          try {
+            const { searchDatasets } = await import('./commands/download.js');
+            const datasets = await searchDatasets('');
+            setLoading(false);
+            
+            if (datasets.length === 0) {
+              addOutput('  [-] no datasets available');
+              return;
+            }
+            
+            addOutput([
+              '',
+              '  AVAILABLE DATASETS',
+              '  ────────────────────────────────────────',
+              ...datasets.slice(0, 10).map(d => 
+                `  ${d.id.padEnd(12)} │ ${(d.size / 1e9).toFixed(1).padStart(5)} GB │ ${d.title}`
+              ),
+              ...(datasets.length > 10 ? [`  ... and ${datasets.length - 10} more`] : []),
+              '',
+              '  usage: /download <dataset_id> or <name>',
+              '',
+            ]);
+          } catch (err) {
+            setLoading(false);
+            addOutput(`  [-] API error: ${(err as Error).message}. ensure docker is running.`);
+          }
+          return;
+        }
+
+        setLoading(true, `searching datasets for "${query}"...`);
+        try {
+          const { searchDatasets, startDownload, pollDownload } = await import('./commands/download.js');
+          const datasets = await searchDatasets(query);
+          
+          if (datasets.length === 0) {
+            setLoading(false);
+            addOutput(`  [-] no datasets found matching "${query}"`);
+            return;
+          }
+
+          const target = datasets.find(d => d.id === query || d.title.toLowerCase() === query.toLowerCase()) || datasets[0];
+          setLoading(true, `starting download for ${target.title}...`);
+          
+          const dlId = await startDownload(target);
+          
+          await pollDownload(dlId, (dlStatus) => {
+            setState(s => ({ ...s, loadingMsg: `downloading ${target.id}: ${(dlStatus.progress * 100).toFixed(0)}%` }));
+          });
+
+          setLoading(false);
+          addOutput([
+            '',
+            `  [+] DOWNLOAD COMPLETE: ${target.id}`,
+            `  TITLE: ${target.title}`,
+            `  SIZE:  ${(target.size / 1e9).toFixed(2)} GB`,
+            '',
+          ]);
+        } catch (err) {
+          setLoading(false);
+          addOutput(`  [-] API error: ${(err as Error).message}. ensure docker is running.`);
+        }
         return;
       }
 
       case '/process': {
-        addOutput([
-          '',
-          '  /process -- ROOT File Processing',
-          '  ────────────────────────────────────────',
-          '  requires the OpenCERN API container.',
-          '  start Docker, then retry.',
-          '',
-        ], 'yellow');
+        const fileArg = argStr.trim();
+        if (!fileArg) {
+          addOutput('  usage: /process <file.root>');
+          return;
+        }
+
+        setLoading(true, `processing ${fileArg} via api container...`);
+        try {
+          const { processFile, pollProcess, formatEventSummary } = await import('./commands/process.js');
+          
+          const procId = await processFile(fileArg);
+          
+          const finalStatus = await pollProcess(procId, (pStatus) => {
+            setState(s => ({ ...s, loadingMsg: `processing... ${(pStatus.progress * 100).toFixed(0)}%` }));
+          });
+
+          setLoading(false);
+          addOutput([
+            '',
+            `  [+] PROCESSING COMPLETE: ${fileArg}`,
+            ...formatEventSummary(finalStatus.results),
+            '',
+          ]);
+        } catch (err) {
+          setLoading(false);
+          addOutput(`  [-] process error: ${(err as Error).message}. is the api ready?`);
+        }
         return;
       }
 
@@ -726,20 +847,37 @@ function App(): React.JSX.Element {
   const model = config.get('defaultModel');
 
   return (
-    <Box flexDirection="column" padding={0}>
+    <Box 
+      width={size.columns} 
+      height={size.rows} 
+      flexDirection="column" 
+      borderStyle="round" 
+      borderColor="blue" 
+      paddingX={1}
+      paddingY={0}
+    >
       <StatusBar />
 
-      {/* Output area */}
-      <Box flexDirection="column" paddingX={1} marginY={0} minHeight={3}>
-        {output.slice(-30).map((line, i) => (
-          <Text
-            key={i}
-            color={(line.color as never) || 'white'}
-            bold={line.bold}
-          >
-            {line.text}
-          </Text>
-        ))}
+      {/* Output / Scroll Area */}
+      <Box 
+        flexDirection="column" 
+        flexGrow={1} 
+        paddingX={2} 
+        paddingY={1} 
+        overflowY="hidden"
+        justifyContent="flex-end" // Pushes text down like a real terminal
+      >
+        <Box flexDirection="column">
+          {output.slice(-(size.rows - 15)).map((line, i) => (
+            <Text
+              key={i}
+              color={(line.color as never) || 'white'}
+              bold={line.bold}
+            >
+              {line.text}
+            </Text>
+          ))}
+        </Box>
       </Box>
 
       {/* AI streaming view */}
@@ -819,11 +957,8 @@ function App(): React.JSX.Element {
         </Box>
       )}
 
-      {/* Separator */}
-      <Text color="gray" dimColor>{'  ' + '─'.repeat(76)}</Text>
-
-      {/* Prompt */}
-      <Box paddingX={1} marginTop={0}>
+      {/* Prompt anchored at bottom */}
+      <Box paddingX={1} marginTop={1} borderStyle="round" borderColor="cyan" paddingY={0}>
         <Prompt
           onSubmit={handleInput}
           disabled={promptDisabled}
@@ -835,8 +970,16 @@ function App(): React.JSX.Element {
 }
 
 export async function startApp(): Promise<void> {
-  const { waitUntilExit } = render(<App />);
-  await waitUntilExit();
+  // Enter alternate screen buffer (like vim) to clear scrollback and act fully native
+  process.stdout.write('\x1b[?1049h');
+  
+  try {
+    const { waitUntilExit } = render(<App />, { exitOnCtrlC: false });
+    await waitUntilExit();
+  } finally {
+    // Leave alternate screen buffer on exit
+    process.stdout.write('\x1b[?1049l');
+  }
 }
 
 export default App;

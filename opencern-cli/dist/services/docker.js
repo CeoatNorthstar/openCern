@@ -72,7 +72,62 @@ export const docker = {
             return false;
         }
     },
-    async pullImages(includeQuantum = false) {
+    areImagesPresent(includeQuantum = true) {
+        const images = [
+            'ghcr.io/ceoatnorthstar/api:latest',
+            'ghcr.io/ceoatnorthstar/xrootd:latest',
+            'ghcr.io/ceoatnorthstar/streamer:latest',
+            ...(includeQuantum ? ['ghcr.io/ceoatnorthstar/quantum:latest'] : []),
+        ];
+        for (const image of images) {
+            try {
+                execSync(`docker image inspect ${image} 2>/dev/null`, { stdio: 'ignore' });
+            }
+            catch {
+                return false;
+            }
+        }
+        return true;
+    },
+    getLocalDigest(imageName) {
+        try {
+            const stdout = execSync(`docker image inspect ${imageName} --format="{{index .RepoDigests 0}}" 2>/dev/null`, { encoding: 'utf-8' });
+            const parts = stdout.trim().split('@');
+            return parts.length > 1 ? parts[1] : null;
+        }
+        catch {
+            return null;
+        }
+    },
+    async getRemoteDigest(imageName) {
+        try {
+            const repoPath = imageName.replace('ghcr.io/', '').split(':')[0];
+            const tokenRes = await axios.get(`https://ghcr.io/token?scope=repository:${repoPath}:pull`, { timeout: 3000 });
+            const token = tokenRes.data.token;
+            const manifestRes = await axios.get(`https://ghcr.io/v2/${repoPath}/manifests/latest`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'
+                },
+                timeout: 3000
+            });
+            return manifestRes.headers['docker-content-digest'] || null;
+        }
+        catch {
+            return null;
+        }
+    },
+    async checkForUpdates() {
+        const coreImage = 'ghcr.io/ceoatnorthstar/api:latest';
+        const local = this.getLocalDigest(coreImage);
+        if (!local)
+            return false;
+        const remote = await this.getRemoteDigest(coreImage);
+        if (!remote)
+            return false;
+        return local !== remote;
+    },
+    async pullImages(includeQuantum = true) {
         const images = [
             'ghcr.io/ceoatnorthstar/api:latest',
             'ghcr.io/ceoatnorthstar/xrootd:latest',

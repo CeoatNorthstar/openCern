@@ -1,4 +1,4 @@
-import { jsxs as _jsxs, jsx as _jsx } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 OpenCERN Contributors
 import { useState, useCallback } from 'react';
@@ -80,10 +80,10 @@ export function Prompt({ onSubmit, disabled = false, placeholder }) {
         }
     });
     const visibleCompletions = completions.slice(0, 6);
-    return (_jsxs(Box, { flexDirection: "column", children: [showCompletions && (_jsxs(Box, { flexDirection: "column", marginBottom: 0, children: [visibleCompletions.map((cmd, i) => {
+    return (_jsxs(Box, { flexDirection: "column", width: "100%", children: [showCompletions && (_jsxs(Box, { flexDirection: "column", marginBottom: 1, borderStyle: "single", paddingX: 1, width: "50%", children: [_jsx(Box, { marginBottom: 1, children: _jsx(Text, { bold: true, children: " AVAILABLE COMMANDS" }) }), visibleCompletions.map((cmd, i) => {
                         const selected = i === completionIndex;
-                        return (_jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsxs(Text, { color: selected ? 'cyan' : 'gray', bold: selected, children: ['  ', cmd.name] }), _jsx(Text, { color: "gray", dimColor: true, children: cmd.description })] }, cmd.name));
-                    }), _jsx(Text, { color: "gray", dimColor: true, children: '  ' + '─'.repeat(50) })] })), _jsxs(Box, { flexDirection: "row", alignItems: "center", children: [_jsx(Text, { color: "gray", dimColor: true, children: "opencern" }), _jsx(Text, { color: "cyan", bold: true, children: ' > ' }), disabled ? (_jsx(Text, { color: "gray", children: placeholder || 'Processing...' })) : (_jsx(TextInput, { value: value, onChange: handleChange, onSubmit: handleSubmit, placeholder: placeholder || 'Type / for commands, or ask a question...' }))] })] }));
+                        return (_jsxs(Box, { flexDirection: "row", gap: 1, children: [selected ? _jsxs(Text, { bold: true, children: [" ", '>', " "] }) : _jsx(Text, { children: "   " }), selected ? (_jsxs(Text, { color: "black", backgroundColor: "white", bold: true, children: [" ", cmd.name.padEnd(10), " "] })) : (_jsxs(Text, { children: [" ", cmd.name.padEnd(10), " "] })), _jsx(Text, { dimColor: !selected, children: cmd.description })] }, cmd.name));
+                    })] })), _jsxs(Box, { flexDirection: "row", alignItems: "center", children: [_jsx(Text, { bold: true, children: '> ' }), disabled ? (_jsx(Text, { dimColor: true, italic: true, children: placeholder || 'Processing...' })) : (_jsx(TextInput, { value: value, onChange: handleChange, onSubmit: handleSubmit, placeholder: placeholder || 'Ask anything or type / for commands...' }))] })] }));
 }
 export default Prompt;
 //# sourceMappingURL=Prompt.js.map

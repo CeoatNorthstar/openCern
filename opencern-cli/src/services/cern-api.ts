@@ -13,6 +13,7 @@ import { getToken } from '../utils/auth.js';
 export interface Dataset {
   id: string;
   title: string;
+  description?: string;
   experiment: string;
   year: number;
   energy: string;
@@ -110,12 +111,25 @@ export const cernApi = {
     });
   },
 
-  async searchDatasets(query: string, experiment?: string, year?: number): Promise<Dataset[]> {
+  async searchDatasets(query: string, experiment: string = 'all', year?: number): Promise<Dataset[]> {
     return withRetry(async () => {
-      const res = await createClient().get('/datasets/search', {
-        params: { q: query, experiment, year },
+      const res = await createClient().get('/datasets', {
+        params: { experiment, size: 50 },
       });
-      return res.data;
+      let datasets: Dataset[] = res.data.datasets || [];
+      
+      const q = query.toLowerCase().trim();
+      if (q) {
+        datasets = datasets.filter(d => 
+          d.title.toLowerCase().includes(q) || 
+          (d.description && d.description.toLowerCase().includes(q)) || 
+          d.id.toLowerCase() === q
+        );
+      }
+      if (year) {
+        datasets = datasets.filter(d => d.year === year);
+      }
+      return datasets;
     });
   },
 

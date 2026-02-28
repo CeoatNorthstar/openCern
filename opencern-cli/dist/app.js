@@ -7,7 +7,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  * See LICENSE.enterprise for full terms.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useApp, useInput } from 'ink';
+import { render, Box, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 import { StatusBar } from './components/StatusBar.js';
 import { Prompt } from './components/Prompt.js';
@@ -20,7 +20,7 @@ import { add as addHistory, getAll as getAllHistory } from './utils/history.js';
 import { isAuthenticated } from './utils/auth.js';
 import { docker } from './services/docker.js';
 import { anthropicService } from './services/anthropic.js';
-import { getHelpText, getBannerText } from './commands/help.js';
+import { getHelpText } from './commands/help.js';
 import { getSystemStatus, formatStatus } from './commands/status.js';
 import { runDoctorChecks, formatDoctorResults } from './commands/doctor.js';
 import { login, logout } from './commands/auth.js';
@@ -49,6 +49,17 @@ function App() {
         configIndex: 0,
         configValue: '',
     });
+    // Fullscreen responsive sizing
+    const { stdout } = useStdout();
+    const [size, setSize] = useState({
+        columns: stdout.columns || 80,
+        rows: stdout.rows || 24
+    });
+    useEffect(() => {
+        const onResize = () => setSize({ columns: stdout.columns, rows: stdout.rows });
+        stdout.on('resize', onResize);
+        return () => { stdout.off('resize', onResize); };
+    }, [stdout]);
     function addOutput(lines, color, bold) {
         const arr = Array.isArray(lines) ? lines : [lines];
         setState(s => ({
@@ -117,27 +128,60 @@ function App() {
         config.load();
         if (firstRun) {
             addOutput([
-                ...getBannerText(),
-                '  Welcome to OpenCERN CLI',
-                '  AI-powered particle physics analysis',
+                '   _____                 _____________  _   __',
+                '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+                ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+                ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+                '     /_/                                              ',
+                '',
+                '  Welcome to OpenCERN CLI — Autonomous Mode',
+                '  AI-powered particle physics analysis and quantum computing',
                 '',
                 '  Run /config to configure your API keys.',
                 '  Run /help to see all available commands.',
                 '',
-            ], 'cyan');
+            ], undefined, true);
         }
         else {
             addOutput([
+                '   _____                 _____________  _   __',
+                '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+                ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+                ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+                '     /_/                                              ',
                 '',
-                '  opencern -- type / for commands or ask a question',
+                '  OpenCERN Engine Ready — Autonomous Mode',
+                '  Type / for commands or ask a physics question',
                 '',
-            ], 'gray');
+            ], undefined, true);
         }
         // Check Docker in background
         if (config.get('autoStartDocker')) {
             (async () => {
                 const running = docker.isDockerRunning();
                 if (running) {
+                    const present = docker.areImagesPresent();
+                    if (!present) {
+                        addOutput('  missing required engine images. pulling from GHCR (this may take a minute)...', 'cyan');
+                        try {
+                            await docker.pullImages();
+                            addOutput('  [+] engine downloaded successfully', 'green');
+                        }
+                        catch (err) {
+                            addOutput(`  [-] failed to pull engine: ${err.message}`, 'red');
+                            return;
+                        }
+                    }
+                    else {
+                        // Check for updates asynchronously
+                        docker.checkForUpdates().then(hasUpdate => {
+                            if (hasUpdate) {
+                                addOutput('', 'gray');
+                                addOutput('  [*] An update is available for the OpenCERN engine!', 'cyan', true);
+                                addOutput('      Run "/update" to download the latest version.', 'cyan');
+                            }
+                        }).catch(() => { });
+                    }
                     const ready = await docker.isApiReady();
                     if (!ready) {
                         addOutput('  starting containers...', 'gray');
@@ -149,6 +193,9 @@ function App() {
                             addOutput(`  [-] could not start containers: ${err.message}`, 'yellow');
                         }
                     }
+                }
+                else {
+                    addOutput('  [!] Docker Desktop is not running. Core features will be disabled.', 'yellow');
                 }
             })();
         }
@@ -564,27 +611,62 @@ function App() {
                 return;
             }
             case '/download': {
-                addOutput([
-                    '',
-                    '  /download -- CERN Open Data',
-                    '  ────────────────────────────────────────',
-                    '  requires the OpenCERN API container.',
-                    `  searching for: "${argStr || 'all datasets'}"`,
-                    '',
-                    '  check /status, then retry.',
-                    '',
-                ], 'yellow');
+                const query = argStr.trim() || 'Higgs Boson';
+                setLoading(true, `searching datasets for "${query}"...`);
+                try {
+                    const { searchDatasets, startDownload, pollDownload } = await import('./commands/download.js');
+                    const datasets = await searchDatasets(query);
+                    if (datasets.length === 0) {
+                        setLoading(false);
+                        addOutput(`  [-] no datasets found matching "${query}"`);
+                        return;
+                    }
+                    const target = datasets[0];
+                    setLoading(true, `starting download for ${target.title}...`);
+                    const dlId = await startDownload(target);
+                    await pollDownload(dlId, (dlStatus) => {
+                        setState(s => ({ ...s, loadingMsg: `downloading ${target.id}: ${(dlStatus.progress * 100).toFixed(0)}%` }));
+                    });
+                    setLoading(false);
+                    addOutput([
+                        '',
+                        `  [+] DOWNLOAD COMPLETE: ${target.id}`,
+                        `  TITLE: ${target.title}`,
+                        `  SIZE:  ${(target.size / 1e9).toFixed(2)} GB`,
+                        '',
+                    ]);
+                }
+                catch (err) {
+                    setLoading(false);
+                    addOutput(`  [-] API error: ${err.message}. ensure docker is running.`);
+                }
                 return;
             }
             case '/process': {
-                addOutput([
-                    '',
-                    '  /process -- ROOT File Processing',
-                    '  ────────────────────────────────────────',
-                    '  requires the OpenCERN API container.',
-                    '  start Docker, then retry.',
-                    '',
-                ], 'yellow');
+                const fileArg = argStr.trim();
+                if (!fileArg) {
+                    addOutput('  usage: /process <file.root>');
+                    return;
+                }
+                setLoading(true, `processing ${fileArg} via api container...`);
+                try {
+                    const { processFile, pollProcess, formatEventSummary } = await import('./commands/process.js');
+                    const procId = await processFile(fileArg);
+                    const finalStatus = await pollProcess(procId, (pStatus) => {
+                        setState(s => ({ ...s, loadingMsg: `processing... ${(pStatus.progress * 100).toFixed(0)}%` }));
+                    });
+                    setLoading(false);
+                    addOutput([
+                        '',
+                        `  [+] PROCESSING COMPLETE: ${fileArg}`,
+                        ...formatEventSummary(finalStatus.results),
+                        '',
+                    ]);
+                }
+                catch (err) {
+                    setLoading(false);
+                    addOutput(`  [-] process error: ${err.message}. is the api ready?`);
+                }
                 return;
             }
             default: {
@@ -600,11 +682,20 @@ function App() {
     }
     const { output, isLoading, loadingMsg, view, aiTokens, aiStreaming, aiTokenCount, aiLatency, pendingTool, toolResults, fileContent, progress, quantumJob, quantumRunning, quantumBackend, quantumCircuit, promptDisabled } = state;
     const model = config.get('defaultModel');
-    return (_jsxs(Box, { flexDirection: "column", padding: 0, children: [_jsx(StatusBar, {}), _jsx(Box, { flexDirection: "column", paddingX: 1, marginY: 0, minHeight: 3, children: output.slice(-30).map((line, i) => (_jsx(Text, { color: line.color || 'white', bold: line.bold, children: line.text }, i))) }), (view === 'ask' || view === 'opask') && (aiTokens || aiStreaming || pendingTool) && (_jsxs(Box, { flexDirection: view === 'opask' ? 'row' : 'column', paddingX: 1, children: [_jsx(Box, { flexDirection: "column", flexGrow: 1, children: _jsx(AIStream, { tokens: aiTokens, isStreaming: aiStreaming, onCancel: () => { abortRef.current?.abort(); setState(s => ({ ...s, aiStreaming: false })); }, model: model, tokenCount: aiTokenCount, latency: aiLatency, pendingTool: pendingTool, toolResults: toolResults, onApprove: handleApprove, onDeny: handleDeny }) }), view === 'opask' && fileContent && (_jsx(Box, { flexDirection: "column", flexGrow: 1, marginLeft: 2, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, focused: false }) }))] })), view === 'open' && fileContent && (_jsx(Box, { paddingX: 1, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, onClose: () => setState(s => ({ ...s, view: 'home', fileContent: undefined })) }) })), view === 'quantum' && (_jsx(Box, { paddingX: 1, children: _jsx(QuantumPanel, { job: quantumJob, isRunning: quantumRunning, backend: quantumBackend, circuitDiagram: quantumCircuit }) })), progress && (_jsx(Box, { paddingX: 1, children: _jsx(ProgressBar, { label: progress.label, percent: progress.percent, speed: progress.speed, eta: progress.eta, mode: progress.mode }) })), isLoading && (_jsxs(Box, { paddingX: 1, children: [_jsx(Text, { color: "blue", children: _jsx(Spinner, { type: "dots" }) }), _jsxs(Text, { color: "gray", children: ["  ", loadingMsg] })] })), _jsx(Text, { color: "gray", dimColor: true, children: '  ' + '─'.repeat(76) }), _jsx(Box, { paddingX: 1, marginTop: 0, children: _jsx(Prompt, { onSubmit: handleInput, disabled: promptDisabled, placeholder: promptDisabled ? (pendingTool ? 'Enter to approve, Esc to skip' : 'Processing... (Esc to cancel)') : undefined }) })] }));
+    return (_jsxs(Box, { width: size.columns, height: size.rows, flexDirection: "column", borderStyle: "round", borderColor: "blue", paddingX: 1, paddingY: 0, children: [_jsx(StatusBar, {}), _jsx(Box, { flexDirection: "column", flexGrow: 1, paddingX: 2, paddingY: 1, overflowY: "hidden", justifyContent: "flex-end" // Pushes text down like a real terminal
+                , children: _jsx(Box, { flexDirection: "column", children: output.slice(-(size.rows - 15)).map((line, i) => (_jsx(Text, { color: line.color || 'white', bold: line.bold, children: line.text }, i))) }) }), (view === 'ask' || view === 'opask') && (aiTokens || aiStreaming || pendingTool) && (_jsxs(Box, { flexDirection: view === 'opask' ? 'row' : 'column', paddingX: 1, children: [_jsx(Box, { flexDirection: "column", flexGrow: 1, children: _jsx(AIStream, { tokens: aiTokens, isStreaming: aiStreaming, onCancel: () => { abortRef.current?.abort(); setState(s => ({ ...s, aiStreaming: false })); }, model: model, tokenCount: aiTokenCount, latency: aiLatency, pendingTool: pendingTool, toolResults: toolResults, onApprove: handleApprove, onDeny: handleDeny }) }), view === 'opask' && fileContent && (_jsx(Box, { flexDirection: "column", flexGrow: 1, marginLeft: 2, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, focused: false }) }))] })), view === 'open' && fileContent && (_jsx(Box, { paddingX: 1, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, onClose: () => setState(s => ({ ...s, view: 'home', fileContent: undefined })) }) })), view === 'quantum' && (_jsx(Box, { paddingX: 1, children: _jsx(QuantumPanel, { job: quantumJob, isRunning: quantumRunning, backend: quantumBackend, circuitDiagram: quantumCircuit }) })), progress && (_jsx(Box, { paddingX: 1, children: _jsx(ProgressBar, { label: progress.label, percent: progress.percent, speed: progress.speed, eta: progress.eta, mode: progress.mode }) })), isLoading && (_jsxs(Box, { paddingX: 1, children: [_jsx(Text, { color: "blue", children: _jsx(Spinner, { type: "dots" }) }), _jsxs(Text, { color: "gray", children: ["  ", loadingMsg] })] })), _jsx(Box, { paddingX: 1, marginTop: 1, borderStyle: "round", borderColor: "cyan", paddingY: 0, children: _jsx(Prompt, { onSubmit: handleInput, disabled: promptDisabled, placeholder: promptDisabled ? (pendingTool ? 'Enter to approve, Esc to skip' : 'Processing... (Esc to cancel)') : undefined }) })] }));
 }
 export async function startApp() {
-    const { waitUntilExit } = render(_jsx(App, {}));
-    await waitUntilExit();
+    // Enter alternate screen buffer (like vim) to clear scrollback and act fully native
+    process.stdout.write('\x1b[?1049h');
+    try {
+        const { waitUntilExit } = render(_jsx(App, {}), { exitOnCtrlC: false });
+        await waitUntilExit();
+    }
+    finally {
+        // Leave alternate screen buffer on exit
+        process.stdout.write('\x1b[?1049l');
+    }
 }
 export default App;
 //# sourceMappingURL=app.js.map

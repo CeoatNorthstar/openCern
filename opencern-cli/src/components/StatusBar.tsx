@@ -41,32 +41,27 @@ export function StatusBar(): React.JSX.Element {
   const model = config.get('defaultModel');
   const shortModel = model.replace('claude-', '').replace(/-\d{8}$/, '');
 
-  // Status indicators — clean unicode, no emojis
-  const dot = (ok: boolean, checking: boolean) =>
-    checking ? '~' : ok ? '+' : '-';
-
-  const dockerColor = status.checking ? 'yellow' : status.dockerRunning ? 'green' : 'red';
-  const apiColor = status.checking ? 'yellow' : status.apiReady ? 'green' : 'red';
-  const quantumColor = status.quantumReady ? 'green' : 'gray';
-  const authColor = status.authStatus ? 'green' : 'yellow';
+  const dockerText = status.checking ? 'DOCKER ~' : status.dockerRunning ? 'DOCKER √' : 'DOCKER X';
+  const apiText = status.checking ? 'API ~' : status.apiReady ? 'API √' : 'API X';
+  const quantumText = status.checking ? 'QC ~' : status.quantumReady ? 'QC √' : 'QC X';
+  const authText = status.authStatus ? 'AUTH √' : 'AUTH X';
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between" paddingX={2}>
-        <Box gap={1}>
-          <Text bold color="cyan">opencern</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={dockerColor}>docker {dot(status.dockerRunning, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={apiColor}>api {dot(status.apiReady, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={quantumColor}>qc {dot(status.quantumReady, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={authColor}>{status.authStatus ? 'authenticated' : 'not signed in'}</Text>
-        </Box>
-        <Text color="gray" dimColor>{shortModel}</Text>
+    <Box flexDirection="row" justifyContent="space-between" paddingX={2} paddingY={0} borderStyle="single" borderBottom>
+      <Box gap={1} alignItems="center">
+        <Text backgroundColor="white" color="black" bold> OPENCERN </Text>
+        <Text dimColor>│</Text>
+        <Text bold={status.dockerRunning} dimColor={!status.dockerRunning}>{dockerText}</Text>
+        <Text dimColor>│</Text>
+        <Text bold={status.apiReady} dimColor={!status.apiReady}>{apiText}</Text>
+        <Text dimColor>│</Text>
+        <Text bold={status.quantumReady} dimColor={!status.quantumReady}>{quantumText}</Text>
+        <Text dimColor>│</Text>
+        <Text bold={status.authStatus} dimColor={!status.authStatus}>{authText}</Text>
       </Box>
-      <Text color="gray" dimColor>{'  ' + '─'.repeat(76)}</Text>
+      <Box alignItems="center">
+        <Text backgroundColor="white" color="black" bold> {shortModel.toUpperCase()} </Text>
+      </Box>
     </Box>
   );
 }

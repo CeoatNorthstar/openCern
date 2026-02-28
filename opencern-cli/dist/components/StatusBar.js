@@ -28,13 +28,11 @@ export function StatusBar() {
     }, []);
     const model = config.get('defaultModel');
     const shortModel = model.replace('claude-', '').replace(/-\d{8}$/, '');
-    // Status indicators — clean unicode, no emojis
-    const dot = (ok, checking) => checking ? '~' : ok ? '+' : '-';
-    const dockerColor = status.checking ? 'yellow' : status.dockerRunning ? 'green' : 'red';
-    const apiColor = status.checking ? 'yellow' : status.apiReady ? 'green' : 'red';
-    const quantumColor = status.quantumReady ? 'green' : 'gray';
-    const authColor = status.authStatus ? 'green' : 'yellow';
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Box, { flexDirection: "row", justifyContent: "space-between", paddingX: 2, children: [_jsxs(Box, { gap: 1, children: [_jsx(Text, { bold: true, color: "cyan", children: "opencern" }), _jsx(Text, { color: "gray", dimColor: true, children: "|" }), _jsxs(Text, { color: dockerColor, children: ["docker ", dot(status.dockerRunning, status.checking)] }), _jsx(Text, { color: "gray", dimColor: true, children: "|" }), _jsxs(Text, { color: apiColor, children: ["api ", dot(status.apiReady, status.checking)] }), _jsx(Text, { color: "gray", dimColor: true, children: "|" }), _jsxs(Text, { color: quantumColor, children: ["qc ", dot(status.quantumReady, status.checking)] }), _jsx(Text, { color: "gray", dimColor: true, children: "|" }), _jsx(Text, { color: authColor, children: status.authStatus ? 'authenticated' : 'not signed in' })] }), _jsx(Text, { color: "gray", dimColor: true, children: shortModel })] }), _jsx(Text, { color: "gray", dimColor: true, children: '  ' + '─'.repeat(76) })] }));
+    const dockerText = status.checking ? 'DOCKER ~' : status.dockerRunning ? 'DOCKER √' : 'DOCKER X';
+    const apiText = status.checking ? 'API ~' : status.apiReady ? 'API √' : 'API X';
+    const quantumText = status.checking ? 'QC ~' : status.quantumReady ? 'QC √' : 'QC X';
+    const authText = status.authStatus ? 'AUTH √' : 'AUTH X';
+    return (_jsxs(Box, { flexDirection: "row", justifyContent: "space-between", paddingX: 2, paddingY: 0, borderStyle: "single", borderBottom: true, children: [_jsxs(Box, { gap: 1, alignItems: "center", children: [_jsx(Text, { backgroundColor: "white", color: "black", bold: true, children: " OPENCERN " }), _jsx(Text, { dimColor: true, children: "\u2502" }), _jsx(Text, { bold: status.dockerRunning, dimColor: !status.dockerRunning, children: dockerText }), _jsx(Text, { dimColor: true, children: "\u2502" }), _jsx(Text, { bold: status.apiReady, dimColor: !status.apiReady, children: apiText }), _jsx(Text, { dimColor: true, children: "\u2502" }), _jsx(Text, { bold: status.quantumReady, dimColor: !status.quantumReady, children: quantumText }), _jsx(Text, { dimColor: true, children: "\u2502" }), _jsx(Text, { bold: status.authStatus, dimColor: !status.authStatus, children: authText })] }), _jsx(Box, { alignItems: "center", children: _jsxs(Text, { backgroundColor: "white", color: "black", bold: true, children: [" ", shortModel.toUpperCase(), " "] }) })] }));
 }
 export default StatusBar;
 //# sourceMappingURL=StatusBar.js.map
