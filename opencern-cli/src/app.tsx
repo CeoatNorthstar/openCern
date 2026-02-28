@@ -726,28 +726,70 @@ function App(): React.JSX.Element {
       }
 
       case '/download': {
-        addOutput([
-          '',
-          '  /download -- CERN Open Data',
-          '  ────────────────────────────────────────',
-          '  requires the OpenCERN API container.',
-          `  searching for: "${argStr || 'all datasets'}"`,
-          '',
-          '  check /status, then retry.',
-          '',
-        ], 'yellow');
+        const query = argStr.trim() || 'Higgs Boson';
+        setLoading(true, `searching datasets for "${query}"...`);
+        try {
+          const { searchDatasets, startDownload, pollDownload } = await import('./commands/download.js');
+          const datasets = await searchDatasets(query);
+          
+          if (datasets.length === 0) {
+            setLoading(false);
+            addOutput(`  [-] no datasets found matching "${query}"`);
+            return;
+          }
+
+          const target = datasets[0];
+          setLoading(true, `starting download for ${target.title}...`);
+          
+          const dlId = await startDownload(target);
+          
+          await pollDownload(dlId, (dlStatus) => {
+            setState(s => ({ ...s, loadingMsg: `downloading ${target.id}: ${(dlStatus.progress * 100).toFixed(0)}%` }));
+          });
+
+          setLoading(false);
+          addOutput([
+            '',
+            `  [+] DOWNLOAD COMPLETE: ${target.id}`,
+            `  TITLE: ${target.title}`,
+            `  SIZE:  ${(target.size / 1e9).toFixed(2)} GB`,
+            '',
+          ]);
+        } catch (err) {
+          setLoading(false);
+          addOutput(`  [-] API error: ${(err as Error).message}. ensure docker is running.`);
+        }
         return;
       }
 
       case '/process': {
-        addOutput([
-          '',
-          '  /process -- ROOT File Processing',
-          '  ────────────────────────────────────────',
-          '  requires the OpenCERN API container.',
-          '  start Docker, then retry.',
-          '',
-        ], 'yellow');
+        const fileArg = argStr.trim();
+        if (!fileArg) {
+          addOutput('  usage: /process <file.root>');
+          return;
+        }
+
+        setLoading(true, `processing ${fileArg} via api container...`);
+        try {
+          const { processFile, pollProcess, formatEventSummary } = await import('./commands/process.js');
+          
+          const procId = await processFile(fileArg);
+          
+          const finalStatus = await pollProcess(procId, (pStatus) => {
+            setState(s => ({ ...s, loadingMsg: `processing... ${(pStatus.progress * 100).toFixed(0)}%` }));
+          });
+
+          setLoading(false);
+          addOutput([
+            '',
+            `  [+] PROCESSING COMPLETE: ${fileArg}`,
+            ...formatEventSummary(finalStatus.results),
+            '',
+          ]);
+        } catch (err) {
+          setLoading(false);
+          addOutput(`  [-] process error: ${(err as Error).message}. is the api ready?`);
+        }
         return;
       }
 
