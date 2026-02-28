@@ -133,15 +133,19 @@ export const cernApi = {
     });
   },
 
-  async startDownload(datasetId: string, fileNames?: string[]): Promise<{ id: string }> {
+  async startDownload(dataset: Dataset, selectedFiles?: string[]): Promise<{ id: string }> {
     return withRetry(async () => {
-      const res = await createClient().post('/downloads/start', { datasetId, fileNames });
+      const files = selectedFiles && selectedFiles.length > 0 ? selectedFiles : dataset.files.map(f => f.url);
+      const res = await createClient().post('/download/multi', { 
+        dataset_title: dataset.title, 
+        files 
+      });
       return res.data;
     });
   },
 
   async downloadStatus(id: string): Promise<DownloadStatus> {
-    const res = await createClient().get('/downloads/status', { params: { id } });
+    const res = await createClient().get('/download/status', { params: { folder: id } });
     return res.data;
   },
 
