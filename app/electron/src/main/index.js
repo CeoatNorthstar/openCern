@@ -7,6 +7,7 @@ const dialog = electron.dialog
 const path = require('path')
 const { exec } = require('child_process')
 const http = require('http')
+const DockerManager = require('./docker-manager')
 
 let win;
 
@@ -142,10 +143,55 @@ if (!gotTheLock) {
     const splash = showSplash();
     await new Promise(r => setTimeout(r, 5000)); // Let video play
 
-    // 3. Start ALL containers (frontend + API + streamer + xrootd)
-    //    Uses -p opencern so project name is always consistent
+    // 3. Docker Auto-Pull & Update Check
+    const dockerManager = new DockerManager(dockerEnv(), composePath());
+    const imagesPresent = await dockerManager.areImagesPresent();
+
+    if (!imagesPresent) {
+      console.log("First launch: missing images. Pulling...");
+      await splash.webContents.executeJavaScript(`document.getElementById('s').innerText = 'Downloading OpenCERN Engine... This may take a few minutes.'`);
+      try {
+        await dockerManager.pullImages((msg) => {
+          splash.webContents.executeJavaScript(`document.getElementById('s').innerText = ${JSON.stringify('Downloading: ' + msg)}`).catch(()=>{});
+        });
+      } catch (err) {
+        dialog.showErrorBox("Startup Failed", "Failed to download the OpenCERN Engine containers.\\n\\n" + err.message);
+        app.quit();
+        return;
+      }
+      await splash.webContents.executeJavaScript(`document.getElementById('s').innerText = 'Starting physics environments...'`);
+    } else {
+      console.log("Images present. Checking for updates in background...");
+      // Check for updates asynchronously so we don't block startup too long
+      const hasUpdate = await Promise.race([
+        dockerManager.checkForUpdates(),
+        new Promise(r => setTimeout(() => r(false), 3000)) // 3s timeout for ping check
+      ]);
+      
+      if (hasUpdate) {
+        const result = dialog.showMessageBoxSync({
+          type: 'info',
+          buttons: ['Update Now', 'Skip for now'],
+          title: 'Update Available',
+          message: 'A newer version of the OpenCERN engine is available. Would you like to download it now? (Recommended for performance and bug fixes)'
+        });
+        if (result === 0) {
+          await splash.webContents.executeJavaScript(`document.getElementById('s').innerText = 'Downloading Update... Please wait.'`);
+          try {
+             await dockerManager.pullImages((msg) => {
+               splash.webContents.executeJavaScript(`document.getElementById('s').innerText = ${JSON.stringify('Updating: ' + msg)}`).catch(()=>{});
+             });
+          } catch (err) {
+             console.error("Update failed", err);
+          }
+          await splash.webContents.executeJavaScript(`document.getElementById('s').innerText = 'Starting physics environments...'`);
+        }
+      }
+    }
+
+    // 4. Start ALL containers (frontend + API + streamer + xrootd)
     console.log("Starting containers...");
-    await runDocker('up -d --build');
+    await runDocker('up -d');
 
     // 4. Wait for frontend (port 3000) — this is the gate
     console.log("Waiting for frontend (port 3000)...");
@@ -163,12 +209,12 @@ if (!gotTheLock) {
       return;
     }
 
-    // 5. Also wait for API (port 8080)
+    // 6. Also wait for API (port 8080)
     console.log("Waiting for API (port 8080)...");
     const apiOk = await waitForPort(8080, 30000);
     console.log("API:", apiOk ? "READY" : "TIMEOUT (continuing anyway)");
 
-    // 6. Show main window
+    // 7. Show main window
     win = new BrowserWindow({
       width: 1400, height: 900,
       titleBarStyle: 'hiddenInset',

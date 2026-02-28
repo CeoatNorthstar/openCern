@@ -8,6 +8,10 @@
 declare function ensureComposeFile(includeQuantum?: boolean): void;
 export declare const docker: {
     isDockerRunning(): boolean;
+    areImagesPresent(includeQuantum?: boolean): boolean;
+    getLocalDigest(imageName: string): string | null;
+    getRemoteDigest(imageName: string): Promise<string | null>;
+    checkForUpdates(): Promise<boolean>;
     pullImages(includeQuantum?: boolean): Promise<void>;
     startContainers(includeQuantum?: boolean): Promise<void>;
     stopContainers(): Promise<void>;

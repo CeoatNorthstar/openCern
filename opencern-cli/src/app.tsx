@@ -209,6 +209,27 @@ function App(): React.JSX.Element {
       (async () => {
         const running = docker.isDockerRunning();
         if (running) {
+          const present = docker.areImagesPresent();
+          if (!present) {
+             addOutput('  missing required engine images. pulling from GHCR (this may take a minute)...', 'cyan');
+             try {
+                await docker.pullImages();
+                addOutput('  [+] engine downloaded successfully', 'green');
+             } catch (err) {
+                addOutput(`  [-] failed to pull engine: ${(err as Error).message}`, 'red');
+                return;
+             }
+          } else {
+             // Check for updates asynchronously
+             docker.checkForUpdates().then(hasUpdate => {
+                 if (hasUpdate) {
+                     addOutput('', 'gray');
+                     addOutput('  [*] An update is available for the OpenCERN engine!', 'cyan', true);
+                     addOutput('      Run "/update" to download the latest version.', 'cyan');
+                 }
+             }).catch(() => {});
+          }
+
           const ready = await docker.isApiReady();
           if (!ready) {
             addOutput('  starting containers...', 'gray');
@@ -219,6 +240,8 @@ function App(): React.JSX.Element {
               addOutput(`  [-] could not start containers: ${(err as Error).message}`, 'yellow');
             }
           }
+        } else {
+            addOutput('  [!] Docker Desktop is not running. Core features will be disabled.', 'yellow');
         }
       })();
     }
