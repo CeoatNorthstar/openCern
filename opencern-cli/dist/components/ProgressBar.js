@@ -1,4 +1,6 @@
 import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 import { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

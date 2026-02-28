@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) 2026 OpenCERN. All Rights Reserved.
+ *
+ * PROPRIETARY AND CONFIDENTIAL — Enterprise Component
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ * See LICENSE.enterprise for full terms.
+ */
 import type { Dataset, DownloadStatus } from '../services/cern-api.js';
 export type { Dataset, DownloadStatus };
 export declare function searchDatasets(query: string, experiment?: string, year?: number): Promise<Dataset[]>;

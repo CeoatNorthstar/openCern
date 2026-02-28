@@ -1,4 +1,11 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+/**
+ * Copyright (c) 2026 OpenCERN. All Rights Reserved.
+ *
+ * PROPRIETARY AND CONFIDENTIAL — Enterprise Component
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ * See LICENSE.enterprise for full terms.
+ */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';

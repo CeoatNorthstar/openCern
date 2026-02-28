@@ -1,4 +1,6 @@
 import { jsxs as _jsxs, jsx as _jsx } from "react/jsx-runtime";
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 import { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
