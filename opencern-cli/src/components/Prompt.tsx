@@ -98,36 +98,46 @@ export function Prompt({ onSubmit, disabled = false, placeholder }: PromptProps)
   const visibleCompletions = completions.slice(0, 6);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width="100%">
       {showCompletions && (
-        <Box flexDirection="column" marginBottom={0}>
+        <Box 
+          flexDirection="column" 
+          marginBottom={1} 
+          borderStyle="round" 
+          borderColor="gray" 
+          paddingX={1}
+          width="50%"
+        >
+          <Box marginBottom={1}>
+             <Text color="gray" bold> Available Commands</Text>
+          </Box>
           {visibleCompletions.map((cmd, i) => {
             const selected = i === completionIndex;
             return (
               <Box key={cmd.name} flexDirection="row" gap={1}>
-                <Text color={selected ? 'cyan' : 'gray'} bold={selected}>
-                  {'  '}{cmd.name}
+                {selected ? <Text color="cyan"> ❯ </Text> : <Text>   </Text>}
+                <Text color={selected ? 'cyan' : 'white'} bold={selected}>
+                  {cmd.name.padEnd(10)}
                 </Text>
-                <Text color="gray" dimColor>
+                <Text color="gray" dimColor={!selected}>
                   {cmd.description}
                 </Text>
               </Box>
             );
           })}
-          <Text color="gray" dimColor>{'  ' + '─'.repeat(50)}</Text>
         </Box>
       )}
       <Box flexDirection="row" alignItems="center">
-        <Text color="gray" dimColor>opencern</Text>
-        <Text color="cyan" bold>{' > '}</Text>
+        <Text color="magenta" bold>╭─</Text>
+        <Text color="cyan" bold> ⚡ </Text>
         {disabled ? (
-          <Text color="gray">{placeholder || 'Processing...'}</Text>
+          <Text color="gray" italic>{placeholder || 'Processing...'}</Text>
         ) : (
           <TextInput
             value={value}
             onChange={handleChange}
             onSubmit={handleSubmit}
-            placeholder={placeholder || 'Type / for commands, or ask a question...'}
+            placeholder={placeholder || 'Ask anything or type / for commands...'}
           />
         )}
       </Box>

@@ -123,18 +123,23 @@ function ToolApprovalCard({ toolCall, onApprove, onDeny }: {
     : 'opencern';
 
   return (
-    <Box flexDirection="column" marginY={1} paddingLeft={2}>
-      <Text color="yellow">run {toolLabel}?</Text>
+    <Box flexDirection="column" marginY={1} paddingX={1} borderStyle="round" borderColor="yellow">
+      <Box flexDirection="row" marginBottom={1} gap={1}>
+         <Text color="black" backgroundColor="yellow" bold> ⚙ EXECUTING </Text>
+         <Text color="yellow"> {toolLabel} </Text>
+      </Box>
       {toolCall.resourceWarning && (
-        <Text color="yellow" dimColor>  {toolCall.resourceWarning}</Text>
+        <Box marginBottom={1}>
+           <Text color="yellow" dimColor>⚠ {toolCall.resourceWarning}</Text>
+        </Box>
       )}
-      <Box flexDirection="column" marginY={0} paddingLeft={2}>
+      <Box flexDirection="column" marginY={0} paddingLeft={1}>
         {(toolCall.displayCode || '').split('\n').map((line, i) => (
           <Text key={i} color="gray">{line}</Text>
         ))}
       </Box>
-      <Box gap={2} marginTop={0}>
-        <Text color="gray" dimColor>Enter to run  ·  Esc to skip</Text>
+      <Box gap={2} marginTop={1}  borderStyle="single" borderTop borderColor="gray">
+        <Text color="gray" dimColor>Press <Text bold color="white">Enter</Text> to run or <Text bold color="white">Esc</Text> to skip</Text>
       </Box>
     </Box>
   );

@@ -51,22 +51,21 @@ export function StatusBar(): React.JSX.Element {
   const authColor = status.authStatus ? 'green' : 'yellow';
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between" paddingX={2}>
-        <Box gap={1}>
-          <Text bold color="cyan">opencern</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={dockerColor}>docker {dot(status.dockerRunning, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={apiColor}>api {dot(status.apiReady, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={quantumColor}>qc {dot(status.quantumReady, status.checking)}</Text>
-          <Text color="gray" dimColor>|</Text>
-          <Text color={authColor}>{status.authStatus ? 'authenticated' : 'not signed in'}</Text>
-        </Box>
-        <Text color="gray" dimColor>{shortModel}</Text>
+    <Box flexDirection="row" justifyContent="space-between" paddingX={2} paddingY={0} borderStyle="single" borderBottom borderColor="gray">
+      <Box gap={1} alignItems="center">
+        <Text backgroundColor="cyan" color="black" bold> OPENCERN </Text>
+        <Text color="gray" dimColor>│</Text>
+        <Text color={dockerColor}>docker {dot(status.dockerRunning, status.checking)}</Text>
+        <Text color="gray" dimColor>│</Text>
+        <Text color={apiColor}>api {dot(status.apiReady, status.checking)}</Text>
+        <Text color="gray" dimColor>│</Text>
+        <Text color={quantumColor}>qc {dot(status.quantumReady, status.checking)}</Text>
+        <Text color="gray" dimColor>│</Text>
+        <Text color={authColor}>{status.authStatus ? 'authenticated' : 'not signed in'}</Text>
       </Box>
-      <Text color="gray" dimColor>{'  ' + '─'.repeat(76)}</Text>
+      <Box alignItems="center">
+        <Text backgroundColor="blue" color="white" bold> {shortModel} </Text>
+      </Box>
     </Box>
   );
 }

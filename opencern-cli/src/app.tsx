@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, useApp, useInput } from 'ink';
+import { render, Box, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 
 import { StatusBar } from './components/StatusBar.js';
@@ -113,6 +113,19 @@ function App(): React.JSX.Element {
     configValue: '',
   });
 
+  // Fullscreen responsive sizing
+  const { stdout } = useStdout();
+  const [size, setSize] = useState({ 
+    columns: stdout.columns || 80, 
+    rows: stdout.rows || 24 
+  });
+
+  useEffect(() => {
+    const onResize = () => setSize({ columns: stdout.columns, rows: stdout.rows });
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
+
   function addOutput(lines: string | string[], color?: string, bold?: boolean) {
     const arr = Array.isArray(lines) ? lines : [lines];
     setState(s => ({
@@ -188,20 +201,31 @@ function App(): React.JSX.Element {
 
     if (firstRun) {
       addOutput([
-        ...getBannerText(),
-        '  Welcome to OpenCERN CLI',
-        '  AI-powered particle physics analysis',
+        '   _____                 _____________  _   __',
+        '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+        ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+        ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+        '     /_/                                              ',
+        '',
+        '  Welcome to OpenCERN CLI — Autonomous Mode',
+        '  AI-powered particle physics analysis and quantum computing',
         '',
         '  Run /config to configure your API keys.',
         '  Run /help to see all available commands.',
         '',
-      ], 'cyan');
+      ], 'cyan', true);
     } else {
       addOutput([
+        '   _____                 _____________  _   __',
+        '  / __  /___  ___  ____ / ____/ ____/ |/ / _ \\/ |/ /',
+        ' / / / / __ \\/ _ \\/ __ \\/ /   / __/ / _  /  _  /   / ',
+        ' \\/_/ / .___/\\___/_/ /_/\\____/\\____/_/ |_/_/ |_/_/|_/  ',
+        '     /_/                                              ',
         '',
-        '  opencern -- type / for commands or ask a question',
+        '  OpenCERN Engine Ready — Autonomous Mode',
+        '  Type / for commands or ask a physics question',
         '',
-      ], 'gray');
+      ], 'cyan', true);
     }
 
     // Check Docker in background
@@ -749,20 +773,37 @@ function App(): React.JSX.Element {
   const model = config.get('defaultModel');
 
   return (
-    <Box flexDirection="column" padding={0}>
+    <Box 
+      width={size.columns} 
+      height={size.rows} 
+      flexDirection="column" 
+      borderStyle="round" 
+      borderColor="blue" 
+      paddingX={1}
+      paddingY={0}
+    >
       <StatusBar />
 
-      {/* Output area */}
-      <Box flexDirection="column" paddingX={1} marginY={0} minHeight={3}>
-        {output.slice(-30).map((line, i) => (
-          <Text
-            key={i}
-            color={(line.color as never) || 'white'}
-            bold={line.bold}
-          >
-            {line.text}
-          </Text>
-        ))}
+      {/* Output / Scroll Area */}
+      <Box 
+        flexDirection="column" 
+        flexGrow={1} 
+        paddingX={2} 
+        paddingY={1} 
+        overflowY="hidden"
+        justifyContent="flex-end" // Pushes text down like a real terminal
+      >
+        <Box flexDirection="column">
+          {output.slice(-(size.rows - 15)).map((line, i) => (
+            <Text
+              key={i}
+              color={(line.color as never) || 'white'}
+              bold={line.bold}
+            >
+              {line.text}
+            </Text>
+          ))}
+        </Box>
       </Box>
 
       {/* AI streaming view */}
@@ -842,11 +883,8 @@ function App(): React.JSX.Element {
         </Box>
       )}
 
-      {/* Separator */}
-      <Text color="gray" dimColor>{'  ' + '─'.repeat(76)}</Text>
-
-      {/* Prompt */}
-      <Box paddingX={1} marginTop={0}>
+      {/* Prompt anchored at bottom */}
+      <Box paddingX={1} marginTop={1} borderStyle="round" borderColor="cyan" paddingY={0}>
         <Prompt
           onSubmit={handleInput}
           disabled={promptDisabled}
@@ -858,8 +896,16 @@ function App(): React.JSX.Element {
 }
 
 export async function startApp(): Promise<void> {
-  const { waitUntilExit } = render(<App />);
-  await waitUntilExit();
+  // Enter alternate screen buffer (like vim) to clear scrollback and act fully native
+  process.stdout.write('\x1b[?1049h');
+  
+  try {
+    const { waitUntilExit } = render(<App />, { exitOnCtrlC: false });
+    await waitUntilExit();
+  } finally {
+    // Leave alternate screen buffer on exit
+    process.stdout.write('\x1b[?1049l');
+  }
 }
 
 export default App;
