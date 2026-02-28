@@ -611,7 +611,34 @@ function App() {
                 return;
             }
             case '/download': {
-                const query = argStr.trim() || 'Higgs Boson';
+                const query = argStr.trim();
+                if (!query) {
+                    setLoading(true, 'fetching available datasets...');
+                    try {
+                        const { searchDatasets } = await import('./commands/download.js');
+                        const datasets = await searchDatasets('');
+                        setLoading(false);
+                        if (datasets.length === 0) {
+                            addOutput('  [-] no datasets available');
+                            return;
+                        }
+                        addOutput([
+                            '',
+                            '  AVAILABLE DATASETS',
+                            '  ────────────────────────────────────────',
+                            ...datasets.slice(0, 10).map(d => `  ${d.id.padEnd(12)} │ ${(d.size / 1e9).toFixed(1).padStart(5)} GB │ ${d.title}`),
+                            ...(datasets.length > 10 ? [`  ... and ${datasets.length - 10} more`] : []),
+                            '',
+                            '  usage: /download <dataset_id> or <name>',
+                            '',
+                        ]);
+                    }
+                    catch (err) {
+                        setLoading(false);
+                        addOutput(`  [-] API error: ${err.message}. ensure docker is running.`);
+                    }
+                    return;
+                }
                 setLoading(true, `searching datasets for "${query}"...`);
                 try {
                     const { searchDatasets, startDownload, pollDownload } = await import('./commands/download.js');
@@ -621,7 +648,7 @@ function App() {
                         addOutput(`  [-] no datasets found matching "${query}"`);
                         return;
                     }
-                    const target = datasets[0];
+                    const target = datasets.find(d => d.id === query || d.title.toLowerCase() === query.toLowerCase()) || datasets[0];
                     setLoading(true, `starting download for ${target.title}...`);
                     const dlId = await startDownload(target);
                     await pollDownload(dlId, (dlStatus) => {

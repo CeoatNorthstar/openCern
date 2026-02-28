@@ -56,12 +56,22 @@ export const cernApi = {
             return res.data;
         });
     },
-    async searchDatasets(query, experiment, year) {
+    async searchDatasets(query, experiment = 'all', year) {
         return withRetry(async () => {
-            const res = await createClient().get('/datasets/search', {
-                params: { q: query, experiment, year },
+            const res = await createClient().get('/datasets', {
+                params: { experiment, size: 50 },
             });
-            return res.data;
+            let datasets = res.data.datasets || [];
+            const q = query.toLowerCase().trim();
+            if (q) {
+                datasets = datasets.filter(d => d.title.toLowerCase().includes(q) ||
+                    (d.description && d.description.toLowerCase().includes(q)) ||
+                    d.id.toLowerCase() === q);
+            }
+            if (year) {
+                datasets = datasets.filter(d => d.year === year);
+            }
+            return datasets;
         });
     },
     async startDownload(datasetId, fileNames) {
