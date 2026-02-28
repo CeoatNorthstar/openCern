@@ -145,7 +145,7 @@ export const docker = {
     }
   },
 
-  async startContainers(includeQuantum = false): Promise<void> {
+  async startContainers(includeQuantum = true): Promise<void> {
     ensureComposeFile(includeQuantum);
     execSync(`docker compose -f ${COMPOSE_FILE} up -d`, { stdio: 'inherit' });
   },
