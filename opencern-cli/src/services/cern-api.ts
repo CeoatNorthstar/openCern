@@ -18,13 +18,7 @@ export interface Dataset {
   year: number;
   energy: string;
   size: number;
-  files: DatasetFile[];
-}
-
-export interface DatasetFile {
-  name: string;
-  size: number;
-  url: string;
+  files: string[];
 }
 
 export interface DownloadStatus {
@@ -135,7 +129,7 @@ export const cernApi = {
 
   async startDownload(dataset: Dataset, selectedFiles?: string[]): Promise<{ id: string }> {
     return withRetry(async () => {
-      const files = selectedFiles && selectedFiles.length > 0 ? selectedFiles : dataset.files.map(f => f.url);
+      const files = selectedFiles && selectedFiles.length > 0 ? selectedFiles : dataset.files;
       const res = await createClient().post('/download/multi', { 
         dataset_title: dataset.title, 
         files 
