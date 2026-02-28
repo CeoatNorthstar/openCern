@@ -56,7 +56,7 @@ export declare const cernApi: {
         version: string;
     }>;
     searchDatasets(query: string, experiment?: string, year?: number): Promise<Dataset[]>;
-    startDownload(datasetId: string, fileNames?: string[]): Promise<{
+    startDownload(dataset: Dataset, selectedFiles?: string[]): Promise<{
         id: string;
     }>;
     downloadStatus(id: string): Promise<DownloadStatus>;

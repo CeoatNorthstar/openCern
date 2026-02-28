@@ -74,14 +74,18 @@ export const cernApi = {
             return datasets;
         });
     },
-    async startDownload(datasetId, fileNames) {
+    async startDownload(dataset, selectedFiles) {
         return withRetry(async () => {
-            const res = await createClient().post('/downloads/start', { datasetId, fileNames });
+            const files = selectedFiles && selectedFiles.length > 0 ? selectedFiles : dataset.files.map(f => f.url);
+            const res = await createClient().post('/download/multi', {
+                dataset_title: dataset.title,
+                files
+            });
             return res.data;
         });
     },
     async downloadStatus(id) {
-        const res = await createClient().get('/downloads/status', { params: { id } });
+        const res = await createClient().get('/download/status', { params: { folder: id } });
         return res.data;
     },
     async cancelDownload(id) {

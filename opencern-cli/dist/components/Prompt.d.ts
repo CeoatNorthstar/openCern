@@ -4,6 +4,7 @@ interface PromptProps {
     disabled?: boolean;
     placeholder?: string;
 }
-export declare function Prompt({ onSubmit, disabled, placeholder }: PromptProps): React.JSX.Element;
+export declare function PromptComponent({ onSubmit, disabled, placeholder }: PromptProps): React.JSX.Element;
+export declare const Prompt: React.MemoExoticComponent<typeof PromptComponent>;
 export default Prompt;
 //# sourceMappingURL=Prompt.d.ts.map
