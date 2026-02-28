@@ -42,7 +42,7 @@ interface PromptProps {
   placeholder?: string;
 }
 
-export function Prompt({ onSubmit, disabled = false, placeholder }: PromptProps): React.JSX.Element {
+export function PromptComponent({ onSubmit, disabled = false, placeholder }: PromptProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [completionIndex, setCompletionIndex] = useState(0);
 
@@ -145,4 +145,5 @@ export function Prompt({ onSubmit, disabled = false, placeholder }: PromptProps)
   );
 }
 
+export const Prompt = React.memo(PromptComponent);
 export default Prompt;

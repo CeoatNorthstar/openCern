@@ -852,7 +852,6 @@ function App(): React.JSX.Element {
       height={size.rows} 
       flexDirection="column" 
       borderStyle="round" 
-      borderColor="blue" 
       paddingX={1}
       paddingY={0}
     >
@@ -958,7 +957,7 @@ function App(): React.JSX.Element {
       )}
 
       {/* Prompt anchored at bottom */}
-      <Box paddingX={1} marginTop={1} borderStyle="round" borderColor="cyan" paddingY={0}>
+      <Box paddingX={1} marginTop={1} borderStyle="round" paddingY={0}>
         <Prompt
           onSubmit={handleInput}
           disabled={promptDisabled}
