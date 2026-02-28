@@ -28,7 +28,7 @@ function renderInline(text: string): React.ReactNode[] {
       return <Text key={i} bold>{part.slice(2, -2)}</Text>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <Text key={i} color="cyan">{part.slice(1, -1)}</Text>;
+      return <Text key={i} italic>{part.slice(1, -1)}</Text>;
     }
     return <Text key={i}>{part}</Text>;
   });
@@ -46,11 +46,11 @@ function renderMarkdown(text: string): React.ReactNode[] {
       if (inCodeBlock) {
         nodes.push(
           <Box key={`code-${i}`} flexDirection="column" marginY={0} paddingLeft={2}>
-            {codeLang && <Text color="gray" dimColor>{codeLang}</Text>}
+            {codeLang && <Text dimColor>{codeLang}</Text>}
             {codeLines.map((l, j) => (
               <Box key={j} flexDirection="row">
-                <Text color="gray" dimColor>{'│ '}</Text>
-                <Text color="green">{l}</Text>
+                <Text dimColor>{'│ '}</Text>
+                <Text>{l}</Text>
               </Box>
             ))}
           </Box>
@@ -70,15 +70,15 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
     // Headers
     if (line.startsWith('### ')) {
-      nodes.push(<Text key={i} bold color="white">{line.slice(4)}</Text>);
+      nodes.push(<Text key={i} bold>{line.slice(4)}</Text>);
       return;
     }
     if (line.startsWith('## ')) {
-      nodes.push(<Text key={i} bold color="cyan">{line.slice(3)}</Text>);
+      nodes.push(<Text key={i} bold>{line.slice(3)}</Text>);
       return;
     }
     if (line.startsWith('# ')) {
-      nodes.push(<Text key={i} bold color="cyan">{line.slice(2)}</Text>);
+      nodes.push(<Text key={i} bold>{line.slice(2)}</Text>);
       return;
     }
     // List items
@@ -94,11 +94,11 @@ function renderMarkdown(text: string): React.ReactNode[] {
   if (inCodeBlock && codeLines.length) {
     nodes.push(
       <Box key="code-end" flexDirection="column" marginY={0} paddingLeft={2}>
-        {codeLang && <Text color="gray" dimColor>{codeLang}</Text>}
+        {codeLang && <Text dimColor>{codeLang}</Text>}
         {codeLines.map((l, j) => (
           <Box key={j} flexDirection="row">
-            <Text color="gray" dimColor>{'│ '}</Text>
-            <Text color="green">{l}</Text>
+            <Text dimColor>{'│ '}</Text>
+            <Text>{l}</Text>
           </Box>
         ))}
       </Box>
@@ -123,46 +123,45 @@ function ToolApprovalCard({ toolCall, onApprove, onDeny }: {
     : 'opencern';
 
   return (
-    <Box flexDirection="column" marginY={1} paddingX={1} borderStyle="round" borderColor="yellow">
+    <Box flexDirection="column" marginY={1} paddingX={1} borderStyle="single">
       <Box flexDirection="row" marginBottom={1} gap={1}>
-         <Text color="black" backgroundColor="yellow" bold> ⚙ EXECUTING </Text>
-         <Text color="yellow"> {toolLabel} </Text>
+         <Text color="black" backgroundColor="white" bold> EXECUTING </Text>
+         <Text bold> {toolLabel} </Text>
       </Box>
       {toolCall.resourceWarning && (
         <Box marginBottom={1}>
-           <Text color="yellow" dimColor>⚠ {toolCall.resourceWarning}</Text>
+           <Text dimColor>⚠ {toolCall.resourceWarning}</Text>
         </Box>
       )}
       <Box flexDirection="column" marginY={0} paddingLeft={1}>
         {(toolCall.displayCode || '').split('\n').map((line, i) => (
-          <Text key={i} color="gray">{line}</Text>
+          <Text key={i} dimColor>{line}</Text>
         ))}
       </Box>
-      <Box gap={2} marginTop={1}  borderStyle="single" borderTop borderColor="gray">
-        <Text color="gray" dimColor>Press <Text bold color="white">Enter</Text> to run or <Text bold color="white">Esc</Text> to skip</Text>
+      <Box gap={2} marginTop={1} borderStyle="single" borderTop>
+        <Text dimColor>Press <Text bold>Enter</Text> to run or <Text bold>Esc</Text> to skip</Text>
       </Box>
     </Box>
   );
 }
 
 function ToolResultCard({ result }: { result: ToolResult }): React.JSX.Element {
-  const statusColor = result.success ? 'green' : 'red';
   const statusIcon = result.success ? '[ok]' : '[err]';
   const durationStr = result.duration ? ` ${result.duration}ms` : '';
 
   return (
     <Box flexDirection="column" marginY={0} paddingX={1}>
       <Box gap={1}>
-        <Text color={statusColor}>{statusIcon}</Text>
-        <Text color="gray" dimColor>execution{durationStr}</Text>
+        <Text bold={!result.success} backgroundColor={result.success ? undefined : "white"} color={result.success ? undefined : "black"}>{statusIcon}</Text>
+        <Text dimColor>execution{durationStr}</Text>
       </Box>
       {result.output && (
-        <Box flexDirection="column" paddingLeft={2} marginY={0}>
+        <Box flexDirection="column" paddingLeft={1} marginY={0}>
           {result.output.split('\n').slice(0, 20).map((line, i) => (
-            <Text key={i} color="gray">{line}</Text>
+            <Text key={i} dimColor>{line}</Text>
           ))}
           {result.output.split('\n').length > 20 && (
-            <Text color="gray" dimColor>... ({result.output.split('\n').length - 20} more lines)</Text>
+            <Text dimColor>... ({result.output.split('\n').length - 20} more lines)</Text>
           )}
         </Box>
       )}
@@ -196,15 +195,14 @@ export function AIStream({
       {/* Thinking / reasoning display */}
       {thinkingText && (
         <Box marginBottom={0} flexDirection="column">
-          <Text color="gray" dimColor>[thinking] {thinkingText}</Text>
+          <Text dimColor>[thinking] {thinkingText}</Text>
         </Box>
       )}
 
       {/* Streaming indicator */}
       {isStreaming && !pendingTool && (
         <Box marginBottom={0}>
-          <Text color="blue"><Spinner type="dots" /></Text>
-          <Text color="gray" dimColor>  generating...</Text>
+          <Text><Spinner type="dots" /> generating...</Text>
         </Box>
       )}
 
@@ -216,13 +214,13 @@ export function AIStream({
       {/* Main text content */}
       <Box flexDirection="column">
         {renderMarkdown(tokens)}
-        {isStreaming && !pendingTool && <Text color="white">_</Text>}
+        {isStreaming && !pendingTool && <Text>_</Text>}
       </Box>
 
       {/* Tool approval card */}
       {pendingTool && (
         <ToolApprovalCard
-          toolCall={pendingTool}
+          toolCall={pendingTool as ToolCall}
           onApprove={onApprove}
           onDeny={onDeny}
         />
@@ -231,9 +229,9 @@ export function AIStream({
       {/* Footer stats */}
       {!isStreaming && tokens && (
         <Box marginTop={1} gap={2}>
-          {model && <Text color="gray" dimColor>{modelShort}</Text>}
-          {tokenCount !== undefined && <Text color="gray" dimColor>{tokenCount.toLocaleString()} tokens</Text>}
-          {latency !== undefined && <Text color="gray" dimColor>{(latency / 1000).toFixed(1)}s</Text>}
+          {model && <Text dimColor>{modelShort}</Text>}
+          {tokenCount !== undefined && <Text dimColor>{tokenCount?.toLocaleString()} tokens</Text>}
+          {latency !== undefined && <Text dimColor>{(latency ? latency / 1000 : 0).toFixed(1)}s</Text>}
         </Box>
       )}
     </Box>

@@ -103,23 +103,24 @@ export function Prompt({ onSubmit, disabled = false, placeholder }: PromptProps)
         <Box 
           flexDirection="column" 
           marginBottom={1} 
-          borderStyle="round" 
-          borderColor="gray" 
+          borderStyle="single" 
           paddingX={1}
           width="50%"
         >
           <Box marginBottom={1}>
-             <Text color="gray" bold> Available Commands</Text>
+             <Text bold> AVAILABLE COMMANDS</Text>
           </Box>
           {visibleCompletions.map((cmd, i) => {
             const selected = i === completionIndex;
             return (
               <Box key={cmd.name} flexDirection="row" gap={1}>
-                {selected ? <Text color="cyan"> ❯ </Text> : <Text>   </Text>}
-                <Text color={selected ? 'cyan' : 'white'} bold={selected}>
-                  {cmd.name.padEnd(10)}
-                </Text>
-                <Text color="gray" dimColor={!selected}>
+                {selected ? <Text bold> {'>'} </Text> : <Text>   </Text>}
+                {selected ? (
+                   <Text color="black" backgroundColor="white" bold> {cmd.name.padEnd(10)} </Text>
+                ) : (
+                   <Text> {cmd.name.padEnd(10)} </Text>
+                )}
+                <Text dimColor={!selected}>
                   {cmd.description}
                 </Text>
               </Box>
@@ -128,10 +129,9 @@ export function Prompt({ onSubmit, disabled = false, placeholder }: PromptProps)
         </Box>
       )}
       <Box flexDirection="row" alignItems="center">
-        <Text color="magenta" bold>╭─</Text>
-        <Text color="cyan" bold> ⚡ </Text>
+        <Text bold>{'> '}</Text>
         {disabled ? (
-          <Text color="gray" italic>{placeholder || 'Processing...'}</Text>
+          <Text dimColor italic>{placeholder || 'Processing...'}</Text>
         ) : (
           <TextInput
             value={value}

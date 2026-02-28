@@ -72,7 +72,7 @@ export const docker = {
             return false;
         }
     },
-    areImagesPresent(includeQuantum = false) {
+    areImagesPresent(includeQuantum = true) {
         const images = [
             'ghcr.io/ceoatnorthstar/api:latest',
             'ghcr.io/ceoatnorthstar/xrootd:latest',
@@ -127,7 +127,7 @@ export const docker = {
             return false;
         return local !== remote;
     },
-    async pullImages(includeQuantum = false) {
+    async pullImages(includeQuantum = true) {
         const images = [
             'ghcr.io/ceoatnorthstar/api:latest',
             'ghcr.io/ceoatnorthstar/xrootd:latest',

@@ -140,7 +140,7 @@ function App() {
                 '  Run /config to configure your API keys.',
                 '  Run /help to see all available commands.',
                 '',
-            ], 'cyan', true);
+            ], undefined, true);
         }
         else {
             addOutput([
@@ -153,7 +153,7 @@ function App() {
                 '  OpenCERN Engine Ready — Autonomous Mode',
                 '  Type / for commands or ask a physics question',
                 '',
-            ], 'cyan', true);
+            ], undefined, true);
         }
         // Check Docker in background
         if (config.get('autoStartDocker')) {

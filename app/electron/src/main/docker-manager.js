@@ -9,7 +9,8 @@ class DockerManager {
     this.images = [
       'ghcr.io/ceoatnorthstar/api:latest',
       'ghcr.io/ceoatnorthstar/xrootd:latest',
-      'ghcr.io/ceoatnorthstar/streamer:latest'
+      'ghcr.io/ceoatnorthstar/streamer:latest',
+      'ghcr.io/ceoatnorthstar/quantum:latest'
     ];
   }
 

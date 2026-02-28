@@ -78,7 +78,7 @@ export const docker = {
     }
   },
 
-  areImagesPresent(includeQuantum = false): boolean {
+  areImagesPresent(includeQuantum = true): boolean {
     const images = [
       'ghcr.io/ceoatnorthstar/api:latest',
       'ghcr.io/ceoatnorthstar/xrootd:latest',
@@ -133,7 +133,7 @@ export const docker = {
     return local !== remote;
   },
 
-  async pullImages(includeQuantum = false): Promise<void> {
+  async pullImages(includeQuantum = true): Promise<void> {
     const images = [
       'ghcr.io/ceoatnorthstar/api:latest',
       'ghcr.io/ceoatnorthstar/xrootd:latest',
