@@ -52,9 +52,9 @@ export async function getSystemStatus() {
     };
 }
 export function formatStatus(status) {
-    const ok = '✓';
-    const fail = '✗';
-    const na = '–';
+    const ok = '[+]';
+    const fail = '[-]';
+    const na = '[~]';
     const lines = [
         '',
         '  System Status',

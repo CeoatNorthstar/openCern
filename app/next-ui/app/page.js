@@ -311,6 +311,7 @@ export default function App() {
   const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-3-7-sonnet-20250219' });
   const [aiModels, setAiModels] = useState([]);
   const [aiError, setAiError] = useState('');
+  const [activeToolExecution, setActiveToolExecution] = useState(null); // Tracks currently running real-world tool execution
   const aiMessagesEndRef = useRef(null);
   const aiAbortRef = useRef(null);
   const aiTextareaRef = useRef(null);
@@ -388,8 +389,17 @@ export default function App() {
     setAiStreaming(true);
     setAiTokens('');
 
-    const allMessages = [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
-    const systemPrompt = buildSystemPrompt(buildContext());
+    // Pre-process messages to flatten tool invocations into the correct Anthropic format
+    const allMessages = [...aiMessages, userMsg].map(m => {
+      // If it's a standard text message
+      if (typeof m.content === 'string') {
+        return { role: m.role, content: m.content };
+      }
+      // If it's a complex array (tool_use / tool_result)
+      return { role: m.role, content: m.content };
+    });
+
+    const systemPrompt = buildSystemPrompt(buildContext()) + "\n\nYou have access to tools. ALWAYS use them if the user asks you to analyze data, run bash commands, or interact with opencern. DO NOT refuse to run code.";
 
     try {
       aiAbortRef.current = new AbortController();
@@ -410,36 +420,60 @@ export default function App() {
         throw new Error(err.error || 'Failed to get response');
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      let buffer = '';
+      const processStream = async (res) => {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+        let toolInvocations = [];
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === 'token') {
-              fullText += evt.text;
-              setAiTokens(fullText);
-            } else if (evt.type === 'done') {
-              setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
-            } else if (evt.type === 'error') {
-              throw new Error(evt.error);
-            }
-          } catch {}
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'token') {
+                fullText += evt.text;
+                setAiTokens(fullText);
+              } else if (evt.type === 'tool_use') {
+                toolInvocations.push(evt);
+              } else if (evt.type === 'done') {
+                setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
+              } else if (evt.type === 'error') {
+                throw new Error(evt.error);
+              }
+            } catch {}
+          }
         }
-      }
 
-      setAiMessages(prev => [...prev, { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }]);
+        let finalContent = fullText;
+        if (toolInvocations.length > 0) {
+          // If tools were used, the content array must contain both the text (if any) and the tool_use blocks
+          finalContent = [];
+          if (fullText.trim()) {
+            finalContent.push({ type: 'text', text: fullText.trim() });
+          }
+          finalContent.push(...toolInvocations.map(t => ({
+            type: 'tool_use',
+            id: t.id,
+            name: t.name,
+            input: t.input,
+            status: 'pending' // UI state: pending human approval
+          })));
+        }
+
+        return finalContent;
+      };
+
+      const finalContent = await processStream(res);
+      setAiMessages(prev => [...prev, { role: 'assistant', content: finalContent, timestamp: new Date().toISOString() }]);
     } catch (err) {
       if (err.name !== 'AbortError') {
         setAiMessages(prev => [...prev, { role: 'assistant', content: `⚠️ Error: ${err.message}`, timestamp: new Date().toISOString(), isError: true }]);
@@ -449,6 +483,151 @@ export default function App() {
       setAiTokens('');
     }
   }, [aiConfig, aiMessages, aiStreaming, buildContext, isAiAuthed]);
+
+  // Handle execution of a pending tool
+  const handleToolAction = useCallback(async (msgIndex, toolIndex, toolObj, action) => {
+    // 1. Mark in UI
+    const updatedMessages = [...aiMessages];
+    const msg = updatedMessages[msgIndex];
+    if (Array.isArray(msg.content)) {
+      msg.content[toolIndex].status = action === 'approve' ? 'running' : 'denied';
+    }
+    setAiMessages(updatedMessages);
+
+    if (action === 'deny') {
+      // Immediately tell anthropic we denied it
+      const toolResultMsg = {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolObj.id,
+          content: 'The user denied the execution of this tool for security reasons.',
+          is_error: true
+        }],
+        timestamp: new Date().toISOString()
+      };
+      // Send background followup without putting the deny message in the UI explicitly (just the card update)
+      sendAiMessageFollowUp([...updatedMessages, toolResultMsg]);
+      return;
+    }
+
+    // Run execution
+    setActiveToolExecution(toolObj.id);
+    try {
+      const res = await fetch('/api/ai/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toolName: toolObj.name,
+          toolInput: toolObj.input
+        })
+      });
+      const data = await res.json();
+      
+      const updatedMessagesPost = [...aiMessages];
+      const msgPost = updatedMessagesPost[msgIndex];
+      if (Array.isArray(msgPost.content)) {
+        msgPost.content[toolIndex].status = data.success ? 'success' : 'failed';
+        msgPost.content[toolIndex].output = data.output;
+        if (data.images?.length > 0) msgPost.content[toolIndex].images = data.images;
+      }
+      setAiMessages(updatedMessagesPost);
+
+      // Tell Anthropic the result so it can summarize
+      let resultText = data.output;
+      if (data.images?.length > 0) {
+        resultText += '\n\n[System: The tool generated images. They have been displayed to the user natively.]';
+      }
+
+      const toolResultMsg = {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolObj.id,
+          content: resultText,
+          is_error: !data.success
+        }],
+        timestamp: new Date().toISOString()
+      };
+      
+      sendAiMessageFollowUp([...updatedMessagesPost, toolResultMsg]);
+
+    } catch (err) {
+      // Network failure
+      const updatedMessagesPost = [...aiMessages];
+      const msgPost = updatedMessagesPost[msgIndex];
+      if (Array.isArray(msgPost.content)) {
+         msgPost.content[toolIndex].status = 'failed';
+         msgPost.content[toolIndex].output = err.message;
+      }
+      setAiMessages(updatedMessagesPost);
+
+      sendAiMessageFollowUp([...updatedMessagesPost, {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: toolObj.id, content: err.message, is_error: true }],
+        timestamp: new Date().toISOString()
+      }]);
+    } finally {
+      setActiveToolExecution(null);
+    }
+  }, [aiMessages]);
+
+  const sendAiMessageFollowUp = async (messagesHistory) => {
+    setAiStreaming(true);
+    setAiTokens('Analyzing execution results...');
+    
+    try {
+      aiAbortRef.current = new AbortController();
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messagesHistory,
+          systemPrompt: buildSystemPrompt(buildContext()),
+          model: aiConfig.model,
+          apiKey: aiConfig.apiKey,
+        }),
+        signal: aiAbortRef.current.signal,
+      });
+
+      if (!res.ok) throw new Error('Follow-up failed');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === 'token') {
+              // Clear 'Analyzing...' on first real token
+              if (fullText === '') setAiTokens(''); 
+              fullText += evt.text;
+              setAiTokens(fullText);
+            } else if (evt.type === 'done') {
+              setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
+            }
+          } catch {}
+        }
+      }
+
+      setAiMessages(prev => {
+        // Find existing history, append the new assistant response
+        return [...messagesHistory, { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }];
+      });
+    } catch(err) {
+      if (err.name !== 'AbortError') console.error('Follow-up error:', err);
+    } finally {
+      setAiStreaming(false);
+      setAiTokens('');
+    }
+  };
 
   const stopAiStream = useCallback(() => {
     aiAbortRef.current?.abort();
@@ -1707,13 +1886,90 @@ export default function App() {
                 /* Conversation mode */
                 <>
                   <div className="ai-chat-messages">
-                    {aiMessages.map((msg, i) => (
-                      <div key={i} className={`ai-chat-message ai-chat-message-${msg.role}`}>
-                        <div className={`ai-chat-bubble ai-chat-bubble-${msg.role}`}>
-                          {msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content}
+                    {aiMessages.map((msg, i) => {
+                      // Filter out user tool_result blocks so they don't render ugly JSON in chat
+                      if (msg.role === 'user' && Array.isArray(msg.content) && msg.content[0]?.type === 'tool_result') {
+                        return null;
+                      }
+                      
+                      return (
+                        <div key={i} className={`ai-chat-message ai-chat-message-\${msg.role}`}>
+                          <div className={`ai-chat-bubble ai-chat-bubble-\${msg.role}`} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {Array.isArray(msg.content) ? (
+                              msg.content.map((block, j) => {
+                                if (block.type === 'text') {
+                                  return <div key={j}>{renderAIMarkdown(block.text)}</div>;
+                                } else if (block.type === 'tool_use') {
+                                  // RENDER TOOL EXECUTION CARD
+                                  let codeStr = '';
+                                  if (block.name === 'execute_python') codeStr = block.input.code;
+                                  else if (block.name === 'execute_bash') codeStr = block.input.command;
+                                  else if (block.name === 'opencern_cli') codeStr = 'opencern ' + block.input.args;
+                                  
+                                  const getStatusColor = (s) => {
+                                    if (s === 'success') return '#10b981';
+                                    if (s === 'failed' || s === 'denied') return '#ef4444';
+                                    if (s === 'running') return '#3b82f6';
+                                    return '#f59e0b';
+                                  };
+
+                                  return (
+                                    <div key={j} style={{ background: '#08080a', border: '1px solid #232328', borderRadius: '8px', overflow: 'hidden' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#131317', borderBottom: '1px solid #232328' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#9ca3af', fontFamily: 'var(--font-geist-mono), monospace' }}>
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+                                          {block.name}
+                                        </div>
+                                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: getStatusColor(block.status) }}>
+                                          {block.status?.toUpperCase() || 'PENDING APPROVAL'}
+                                        </div>
+                                      </div>
+                                      
+                                      <div style={{ padding: '12px', overflowX: 'auto', background: '#000', fontSize: '12px', fontFamily: 'var(--font-geist-mono), Consolas, monospace', color: '#d1d5db', whiteSpace: 'pre-wrap' }}>
+                                        {codeStr}
+                                      </div>
+
+                                      {block.status === 'pending' && (
+                                        <div style={{ display: 'flex', gap: '8px', padding: '8px 12px', background: '#131317', borderTop: '1px solid #232328' }}>
+                                          <button 
+                                            onClick={() => handleToolAction(i, j, block, 'approve')}
+                                            style={{ flex: 1, background: '#10b981', color: '#000', border: 'none', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                          >
+                                            Approve & Run
+                                          </button>
+                                          <button 
+                                            onClick={() => handleToolAction(i, j, block, 'deny')}
+                                            style={{ flex: 1, background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                          >
+                                            Deny
+                                          </button>
+                                        </div>
+                                      )}
+
+                                      {(block.status === 'success' || block.status === 'failed') && block.output && (
+                                        <div style={{ padding: '8px 12px', background: '#0a0a0c', borderTop: '1px solid #232328', fontSize: '11px', fontFamily: 'var(--font-geist-mono), monospace', color: block.status === 'success' ? '#9ca3af' : '#ef4444', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                                          {block.output}
+                                        </div>
+                                      )}
+
+                                      {/* Inline image rendering from executed scripts */}
+                                      {block.images && block.images.map((imgSrc, imgIdx) => (
+                                        <div key={imgIdx} style={{ padding: '12px', background: '#fff', borderTop: '1px solid #232328' }}>
+                                          <img src={imgSrc} alt="Generated output" style={{ maxWidth: '100%', height: 'auto', borderRadius: '4px' }} />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })
+                            ) : (
+                              msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     {aiStreaming && aiTokens && (
                       <div className="ai-chat-message ai-chat-message-assistant">

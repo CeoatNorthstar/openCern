@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 
@@ -26,13 +29,13 @@ function formatEta(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
-function modeIcon(mode: ProgressBarProps['mode']): string {
+function modeLabel(mode: ProgressBarProps['mode']): string {
   switch (mode) {
-    case 'download': return '⬇';
-    case 'upload': return '⬆';
-    case 'quantum': return '⚛';
-    case 'process': return '⚙';
-    default: return '●';
+    case 'download': return 'dl';
+    case 'upload': return 'up';
+    case 'quantum': return 'qc';
+    case 'process': return 'op';
+    default: return '--';
   }
 }
 
@@ -60,11 +63,11 @@ export function ProgressBar({
   const filled = Math.round((Math.min(percent, 100) / 100) * barWidth);
   const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
   const color = error ? 'red' : done ? 'green' : 'blue';
-  const icon = modeIcon(mode);
+  const tag = modeLabel(mode);
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text>{icon}</Text>
+      <Text color="gray">[{tag}]</Text>
       <Text color={done ? 'green' : error ? 'red' : 'white'}>{label}</Text>
       {indeterminate ? (
         <Text color={color}>{SPINNER_FRAMES[spinnerFrame]}</Text>

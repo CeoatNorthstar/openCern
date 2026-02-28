@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
@@ -99,7 +102,7 @@ export function QuantumPanel({ job, isRunning, backend, circuitDiagram }: Quantu
 
       {job?.error && (
         <Box marginTop={1}>
-          <Text color="red">✗ Error: {job.error}</Text>
+          <Text color="red">[-] Error: {job.error}</Text>
         </Box>
       )}
 

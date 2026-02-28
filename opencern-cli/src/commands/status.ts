@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import { docker } from '../services/docker.js';
 import { cernApi } from '../services/cern-api.js';
 import { config } from '../utils/config.js';
@@ -65,9 +68,9 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 }
 
 export function formatStatus(status: SystemStatus): string[] {
-  const ok = '✓';
-  const fail = '✗';
-  const na = '–';
+  const ok = '[+]';
+  const fail = '[-]';
+  const na = '[~]';
 
   const lines: string[] = [
     '',

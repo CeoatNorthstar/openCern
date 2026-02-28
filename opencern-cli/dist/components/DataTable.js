@@ -57,7 +57,7 @@ export function DataTable({ columns, rows, onSelect, maxRows = 20, title, focuse
     return (_jsxs(Box, { flexDirection: "column", children: [title && _jsxs(Text, { bold: true, color: "blue", children: [" ", title] }), _jsx(Box, { flexDirection: "row", children: columns.map((col, i) => (_jsxs(Text, { bold: true, color: "blue", children: [" ", truncate(col.label, colWidths[i]), " "] }, col.key))) }), _jsx(Box, { flexDirection: "row", children: colWidths.map((w, i) => (_jsx(Text, { color: "gray", children: '─'.repeat(w + 2) }, i))) }), visible.map((row, rowIdx) => {
                 const absIdx = rowIdx + scrollOffset;
                 const isSelected = focused && absIdx === selectedRow;
-                return (_jsx(Box, { flexDirection: "row", children: columns.map((col, i) => (_jsxs(Text, { color: isSelected ? 'cyan' : rowIdx % 2 === 0 ? 'white' : 'gray', bold: isSelected, children: [isSelected && i === 0 ? '▶' : ' ', renderCell(col, row[col.key], colWidths[i]), ' '] }, col.key))) }, rowIdx));
+                return (_jsx(Box, { flexDirection: "row", children: columns.map((col, i) => (_jsxs(Text, { color: isSelected ? 'cyan' : rowIdx % 2 === 0 ? 'white' : 'gray', bold: isSelected, children: [isSelected && i === 0 ? '>' : ' ', renderCell(col, row[col.key], colWidths[i]), ' '] }, col.key))) }, rowIdx));
             }), rows.length > maxRows && (_jsxs(Text, { color: "gray", dimColor: true, children: [' ', "Showing ", scrollOffset + 1, "\u2013", Math.min(scrollOffset + maxRows, rows.length), " of ", rows.length] })), onSelect && focused && _jsx(Text, { color: "gray", dimColor: true, children: " \u2191\u2193 navigate \u00B7 Enter select" })] }));
 }
 export default DataTable;

@@ -4,7 +4,6 @@ import { render, Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import { StatusBar } from './components/StatusBar.js';
 import { Prompt } from './components/Prompt.js';
-import { CommandPalette } from './components/CommandPalette.js';
 import { AIStream } from './components/AIStream.js';
 import { ProgressBar } from './components/ProgressBar.js';
 import { FilePreview } from './components/FilePreview.js';
@@ -14,31 +13,31 @@ import { add as addHistory, getAll as getAllHistory } from './utils/history.js';
 import { isAuthenticated } from './utils/auth.js';
 import { docker } from './services/docker.js';
 import { anthropicService } from './services/anthropic.js';
-import { getHelpText } from './commands/help.js';
+import { getHelpText, getBannerText } from './commands/help.js';
 import { getSystemStatus, formatStatus } from './commands/status.js';
 import { runDoctorChecks, formatDoctorResults } from './commands/doctor.js';
 import { login, logout } from './commands/auth.js';
-import { showConfig, getConfigItems, resetConfig } from './commands/config.js';
+import { showConfig, getConfigItems, resetConfig, getKeyStatus, setApiKey, removeApiKey } from './commands/config.js';
 import { checkForUpdates, updateDockerImages } from './commands/update.js';
 import { openFile } from './commands/open.js';
 import { openAndAsk } from './commands/opask.js';
-import { askQuestion } from './commands/ask.js';
 import { extractEvents, runClassification, ensureQuantumRunning } from './commands/quantum.js';
 import { openViz, renderASCII } from './commands/viz.js';
 import { quantumService } from './services/quantum.js';
 function App() {
     const { exit } = useApp();
     const abortRef = useRef(null);
+    const approvalResolveRef = useRef(null);
     const [state, setState] = useState({
         view: 'home',
         output: [],
         isLoading: false,
         loadingMsg: '',
         promptDisabled: false,
-        showPalette: false,
-        paletteQuery: '',
         aiTokens: '',
         aiStreaming: false,
+        pendingTool: null,
+        toolResults: [],
         quantumRunning: false,
         configIndex: 0,
         configValue: '',
@@ -56,6 +55,21 @@ function App() {
     function setLoading(loading, msg = '') {
         setState(s => ({ ...s, isLoading: loading, loadingMsg: msg, promptDisabled: loading }));
     }
+    // Approve/deny handler for agentic tool calls
+    const handleApprove = useCallback(() => {
+        if (approvalResolveRef.current) {
+            approvalResolveRef.current(true);
+            approvalResolveRef.current = null;
+            setState(s => ({ ...s, pendingTool: null }));
+        }
+    }, []);
+    const handleDeny = useCallback(() => {
+        if (approvalResolveRef.current) {
+            approvalResolveRef.current(false);
+            approvalResolveRef.current = null;
+            setState(s => ({ ...s, pendingTool: null }));
+        }
+    }, []);
     // Global keyboard shortcuts
     useInput((input, key) => {
         // Ctrl+D = exit
@@ -68,10 +82,10 @@ function App() {
             clearOutput();
             return;
         }
-        // Escape = cancel streaming / close overlay
+        // Escape = cancel streaming / deny tool
         if (key.escape) {
-            if (state.showPalette) {
-                setState(s => ({ ...s, showPalette: false, paletteQuery: '' }));
+            if (state.pendingTool) {
+                handleDeny();
                 return;
             }
             if (state.aiStreaming) {
@@ -84,6 +98,11 @@ function App() {
             }
             return;
         }
+        // Enter = approve tool (when pending)
+        if (key.return && state.pendingTool) {
+            handleApprove();
+            return;
+        }
     });
     // Startup sequence
     useEffect(() => {
@@ -91,11 +110,11 @@ function App() {
         config.load();
         if (firstRun) {
             addOutput([
+                ...getBannerText(),
+                '  Welcome to OpenCERN CLI',
+                '  AI-powered particle physics analysis',
                 '',
-                '  Welcome to OpenCERN CLI!',
-                '  AI-powered particle physics analysis.',
-                '',
-                '  Let\'s get you set up. Run /config to configure your API keys.',
+                '  Run /config to configure your API keys.',
                 '  Run /help to see all available commands.',
                 '',
             ], 'cyan');
@@ -103,7 +122,7 @@ function App() {
         else {
             addOutput([
                 '',
-                '  OpenCERN CLI — type / for commands or ask a question',
+                '  opencern -- type / for commands or ask a question',
                 '',
             ], 'gray');
         }
@@ -114,35 +133,96 @@ function App() {
                 if (running) {
                     const ready = await docker.isApiReady();
                     if (!ready) {
-                        addOutput('  Starting OpenCERN containers...', 'gray');
+                        addOutput('  starting containers...', 'gray');
                         try {
                             await docker.startContainers();
-                            addOutput('  Containers started.', 'green');
+                            addOutput('  [+] containers started', 'green');
                         }
                         catch (err) {
-                            addOutput(`  Could not start containers: ${err.message}`, 'yellow');
+                            addOutput(`  [-] could not start containers: ${err.message}`, 'yellow');
                         }
                     }
                 }
             })();
         }
         if (!isAuthenticated()) {
-            addOutput('  Tip: Run /login to sign in and unlock all features.', 'yellow');
+            addOutput('  run /login to sign in and unlock all features', 'yellow');
         }
     }, []);
-    const handlePaletteSelect = useCallback((command) => {
-        setState(s => ({ ...s, showPalette: false, paletteQuery: '' }));
-        handleInput(command);
-    }, []);
-    const handleSlash = useCallback(() => {
-        setState(s => ({ ...s, showPalette: true, paletteQuery: '/' }));
-    }, []);
+    // ─── Agentic AI handler ──────────────────────────────────────────
+    async function runAgenticQuery(question) {
+        setState(s => ({
+            ...s,
+            view: 'ask',
+            aiTokens: '',
+            aiStreaming: true,
+            promptDisabled: true,
+            pendingTool: null,
+            toolResults: [],
+        }));
+        abortRef.current = new AbortController();
+        const start = Date.now();
+        try {
+            await anthropicService.agenticStream(question, (event) => {
+                switch (event.type) {
+                    case 'text':
+                        setState(s => ({ ...s, aiTokens: s.aiTokens + (event.text || '') }));
+                        break;
+                    case 'tool_call':
+                        if (event.toolCall) {
+                            setState(s => ({ ...s, pendingTool: event.toolCall }));
+                        }
+                        break;
+                    case 'tool_result':
+                        if (event.toolResult) {
+                            setState(s => ({
+                                ...s,
+                                toolResults: [...s.toolResults, event.toolResult],
+                            }));
+                        }
+                        break;
+                    case 'done':
+                        setState(s => ({
+                            ...s,
+                            aiStreaming: false,
+                            aiTokenCount: event.totalTokens,
+                            aiLatency: Date.now() - start,
+                            promptDisabled: false,
+                        }));
+                        break;
+                    case 'error':
+                        addOutput(`  [err] ${event.error}`, 'red');
+                        setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
+                        break;
+                }
+            }, 
+            // Human-in-the-loop approval callback
+            async (toolCall) => {
+                return new Promise((resolve) => {
+                    approvalResolveRef.current = resolve;
+                    setState(s => ({ ...s, pendingTool: toolCall }));
+                });
+            }, abortRef.current.signal);
+        }
+        catch (err) {
+            setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
+            if (err.message.includes('API key')) {
+                addOutput([
+                    '  Anthropic API key not configured.',
+                    '  Run /config or /keys set anthropic <key>',
+                ], 'yellow');
+            }
+            else {
+                addOutput(`  [err] ${err.message}`, 'red');
+            }
+        }
+    }
+    // ─── Command Router ────────────────────────────────────────────────
     async function handleInput(raw) {
         const input = raw.trim();
         if (!input)
             return;
         addHistory(input);
-        // Parse command and args
         const parts = input.split(/\s+/);
         const cmd = parts[0].toLowerCase();
         const args = parts.slice(1);
@@ -171,7 +251,7 @@ function App() {
             }
             case '/status': {
                 setState(s => ({ ...s, view: 'status' }));
-                setLoading(true, 'Checking system status...');
+                setLoading(true, 'checking system status...');
                 try {
                     const status = await getSystemStatus();
                     setLoading(false);
@@ -179,13 +259,13 @@ function App() {
                 }
                 catch (err) {
                     setLoading(false);
-                    addOutput(`  Error: ${err.message}`, 'red');
+                    addOutput(`  [err] ${err.message}`, 'red');
                 }
                 return;
             }
             case '/doctor': {
                 setState(s => ({ ...s, view: 'doctor' }));
-                setLoading(true, 'Running diagnostics...');
+                setLoading(true, 'running diagnostics...');
                 try {
                     const checks = await runDoctorChecks();
                     setLoading(false);
@@ -193,7 +273,7 @@ function App() {
                 }
                 catch (err) {
                     setLoading(false);
-                    addOutput(`  Error: ${err.message}`, 'red');
+                    addOutput(`  [err] ${err.message}`, 'red');
                 }
                 return;
             }
@@ -204,52 +284,114 @@ function App() {
                 }
                 if (args.includes('--reset')) {
                     resetConfig();
-                    addOutput('  Configuration reset to defaults.', 'green');
+                    addOutput('  [+] configuration reset to defaults', 'green');
                     return;
                 }
-                // Interactive wizard
                 const items = getConfigItems();
                 setState(s => ({ ...s, view: 'config-wizard', configItems: items, configIndex: 0, configValue: '' }));
-                addOutput(['', '  Configuration Wizard', '  ─────────────────────────────────────']);
+                addOutput(['', '  Configuration', '  ────────────────────────────────────────']);
                 addOutput(`  ${items[0].label}: ${items[0].description}`, 'cyan');
-                addOutput(`  Current: ${items[0].current || 'Not set'}`, 'gray');
-                addOutput(`  Enter new value (or press Enter to keep current):`, 'gray');
+                addOutput(`  current: ${items[0].current || 'not set'}`, 'gray');
+                addOutput(`  enter new value (or press Enter to keep current):`, 'gray');
                 addOutput('');
                 return;
             }
+            // ─── Key Management ──────────────────────────────────────────
+            case '/keys': {
+                if (args.length === 0) {
+                    addOutput(getKeyStatus());
+                    return;
+                }
+                const subCmd = args[0];
+                if (subCmd === 'set' && args.length >= 3) {
+                    const result = setApiKey(args[1], args.slice(2).join(' '));
+                    addOutput(`  ${result.success ? '[+]' : '[err]'} ${result.message}`, result.success ? 'green' : 'red');
+                    return;
+                }
+                if (subCmd === 'remove' && args.length >= 2) {
+                    const result = removeApiKey(args[1]);
+                    addOutput(`  ${result.success ? '[+]' : '[err]'} ${result.message}`, result.success ? 'green' : 'red');
+                    return;
+                }
+                addOutput([
+                    '  Usage:',
+                    '    /keys                      show all keys',
+                    '    /keys set <provider> <key>  store a key',
+                    '    /keys remove <provider>     remove a key',
+                    '',
+                    '  Providers: anthropic, ibm-quantum',
+                ], 'gray');
+                return;
+            }
+            // ─── Model Management ────────────────────────────────────────
+            case '/models': {
+                setLoading(true, 'fetching models from Anthropic...');
+                try {
+                    const models = await anthropicService.listModels();
+                    setLoading(false);
+                    const current = config.get('defaultModel');
+                    addOutput(['', '  Available Models', '  ────────────────────────────────────────']);
+                    for (const m of models) {
+                        const active = m.id === current ? ' (active)' : '';
+                        addOutput(`  ${m.id}${active}`, m.id === current ? 'cyan' : 'gray');
+                    }
+                    addOutput(['', '  Switch model: /model <id>', '']);
+                }
+                catch (err) {
+                    setLoading(false);
+                    addOutput(`  [err] ${err.message}`, 'red');
+                }
+                return;
+            }
+            case '/model': {
+                if (!argStr) {
+                    addOutput(`  current model: ${config.get('defaultModel')}`, 'cyan');
+                    addOutput('  switch with: /model <model-id>');
+                    return;
+                }
+                config.set('defaultModel', argStr);
+                addOutput(`  [+] model set to ${argStr}`, 'green');
+                return;
+            }
+            // ─── Usage Stats ─────────────────────────────────────────────
+            case '/usage': {
+                addOutput(anthropicService.getUsageFormatted());
+                return;
+            }
+            // ─── Auth ─────────────────────────────────────────────────────
             case '/login': {
                 setState(s => ({ ...s, view: 'login' }));
-                setLoading(true, 'Initializing login...');
+                setLoading(true, 'initializing login...');
                 try {
                     const result = await login((code, url) => {
                         setLoading(false);
                         addOutput([
                             '',
-                            '  Opening browser for authentication...',
-                            `  If it doesn\'t open, visit: ${url}`,
+                            '  opening browser for authentication...',
+                            `  if it doesn't open, visit: ${url}`,
                             '',
-                            `  Your code: ${code}`,
+                            `  your code: ${code}`,
                             '',
                         ]);
-                        setState(s => ({ ...s, isLoading: true, loadingMsg: 'Waiting for authorization...' }));
+                        setState(s => ({ ...s, isLoading: true, loadingMsg: 'waiting for authorization...' }));
                     }, () => {
-                        setState(s => ({ ...s, isLoading: true, loadingMsg: 'Waiting for authorization...' }));
+                        setState(s => ({ ...s, isLoading: true, loadingMsg: 'waiting for authorization...' }));
                     });
                     setLoading(false);
                     if (result.success) {
                         addOutput([
-                            `  ✓ Signed in${result.username ? ` as ${result.username}` : ''}`,
-                            '  ✓ Token stored in system keychain',
+                            `  [+] signed in${result.username ? ` as ${result.username}` : ''}`,
+                            '  [+] token stored in system keychain',
                             '',
                         ], 'green');
                     }
                     else {
-                        addOutput(`  ✗ Login failed: ${result.error}`, 'red');
+                        addOutput(`  [-] login failed: ${result.error}`, 'red');
                     }
                 }
                 catch (err) {
                     setLoading(false);
-                    addOutput(`  ✗ Login error: ${err.message}`, 'red');
+                    addOutput(`  [-] login error: ${err.message}`, 'red');
                 }
                 setState(s => ({ ...s, view: 'home' }));
                 return;
@@ -257,49 +399,49 @@ function App() {
             case '/logout': {
                 try {
                     await logout();
-                    addOutput('  ✓ Signed out successfully.', 'green');
+                    addOutput('  [+] signed out', 'green');
                 }
                 catch (err) {
-                    addOutput(`  ✗ Logout error: ${err.message}`, 'red');
+                    addOutput(`  [-] logout error: ${err.message}`, 'red');
                 }
                 return;
             }
             case '/update': {
-                setLoading(true, 'Checking for updates...');
+                setLoading(true, 'checking for updates...');
                 try {
                     const info = await checkForUpdates();
                     setLoading(false);
                     if (info.hasUpdate) {
                         addOutput([
-                            `  Update available: v${info.currentVersion} → v${info.latestVersion}`,
-                            '  Run: npm install -g @opencern/cli',
+                            `  update available: v${info.currentVersion} -> v${info.latestVersion}`,
+                            '  run: npm install -g @opencern/cli',
                             '',
-                            '  Pulling latest Docker images...',
+                            '  pulling latest Docker images...',
                         ], 'cyan');
-                        setLoading(true, 'Pulling Docker images...');
+                        setLoading(true, 'pulling Docker images...');
                         await updateDockerImages(img => {
-                            setState(s => ({ ...s, loadingMsg: `Pulling ${img}...` }));
+                            setState(s => ({ ...s, loadingMsg: `pulling ${img}...` }));
                         });
                         setLoading(false);
-                        addOutput('  ✓ Docker images updated.', 'green');
+                        addOutput('  [+] Docker images updated', 'green');
                     }
                     else {
-                        addOutput(`  ✓ Already up to date (v${info.currentVersion}).`, 'green');
+                        addOutput(`  [+] already up to date (v${info.currentVersion})`, 'green');
                     }
                 }
                 catch (err) {
                     setLoading(false);
-                    addOutput(`  ✗ Update error: ${err.message}`, 'red');
+                    addOutput(`  [-] update error: ${err.message}`, 'red');
                 }
                 return;
             }
             case '/open': {
                 const fileArg = argStr.replace('--json', '').replace('--root', '').trim();
                 if (!fileArg) {
-                    addOutput('  Usage: /open <file.json|file.root>', 'yellow');
+                    addOutput('  usage: /open <file.json|file.root>', 'yellow');
                     return;
                 }
-                setLoading(true, `Opening ${fileArg}...`);
+                setLoading(true, `opening ${fileArg}...`);
                 try {
                     const fileContent = await openFile(fileArg);
                     setLoading(false);
@@ -307,14 +449,14 @@ function App() {
                 }
                 catch (err) {
                     setLoading(false);
-                    addOutput(`  ✗ ${err.message}`, 'red');
+                    addOutput(`  [-] ${err.message}`, 'red');
                 }
                 return;
             }
             case '/opask': {
                 const fileArg = argStr.trim();
                 if (!fileArg) {
-                    addOutput('  Usage: /opask <file.json>', 'yellow');
+                    addOutput('  usage: /opask <file.json>', 'yellow');
                     return;
                 }
                 setState(s => ({ ...s, view: 'opask', aiTokens: '', aiStreaming: true }));
@@ -331,72 +473,50 @@ function App() {
                 }
                 catch (err) {
                     setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
-                    addOutput(`  ✗ ${err.message}`, 'red');
+                    addOutput(`  [-] ${err.message}`, 'red');
                 }
                 return;
             }
             case '/ask': {
                 const question = argStr || 'What can you tell me about this dataset?';
-                const fileMatch = args.find(a => a === '--file');
                 const fileIdx = args.indexOf('--file');
                 const filePath = fileIdx >= 0 ? args[fileIdx + 1] : undefined;
                 const cleanQuestion = question.replace('--file', '').replace(filePath || '', '').trim();
-                setState(s => ({ ...s, view: 'ask', aiTokens: '', aiStreaming: true, promptDisabled: true }));
-                abortRef.current = new AbortController();
-                const start = Date.now();
-                try {
-                    const { totalTokens } = await askQuestion(cleanQuestion || question, { file: filePath }, anthropicService.getContext(), token => setState(s => ({ ...s, aiTokens: s.aiTokens + token })), abortRef.current.signal);
-                    setState(s => ({
-                        ...s,
-                        aiStreaming: false,
-                        aiTokenCount: totalTokens,
-                        aiLatency: Date.now() - start,
-                        promptDisabled: false,
-                    }));
-                }
-                catch (err) {
-                    setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
-                    if (err.message.includes('API key')) {
-                        addOutput('  ✗ Anthropic API key not set. Run /config to configure.', 'red');
-                    }
-                    else {
-                        addOutput(`  ✗ ${err.message}`, 'red');
-                    }
-                }
+                await runAgenticQuery(cleanQuestion || question);
                 return;
             }
             case '/quantum': {
                 const subCmd = args[0];
                 const fileArg = args.find(a => !a.startsWith('-')) || args[1];
                 if (subCmd === 'status') {
-                    setLoading(true, 'Checking quantum backend...');
+                    setLoading(true, 'checking quantum backend...');
                     const status = await quantumService.getStatus();
                     setLoading(false);
                     addOutput([
                         '',
-                        `  Quantum backend: ${status.backend}`,
-                        `  Status: ${status.healthy ? 'healthy' : 'offline'}`,
+                        `  quantum backend: ${status.backend}`,
+                        `  status: ${status.healthy ? 'healthy' : 'offline'}`,
                         '',
                     ], status.healthy ? 'green' : 'yellow');
                     return;
                 }
                 const targetFile = fileArg || '';
                 if (!targetFile) {
-                    addOutput('  Usage: /quantum classify <file.json>', 'yellow');
+                    addOutput('  usage: /quantum classify <file.json>', 'yellow');
                     return;
                 }
                 setState(s => ({ ...s, view: 'quantum', quantumRunning: true, quantumJob: undefined }));
-                setLoading(true, 'Checking quantum container...');
+                setLoading(true, 'checking quantum container...');
                 const qReady = await ensureQuantumRunning();
                 if (!qReady) {
                     setLoading(false);
                     setState(s => ({ ...s, quantumRunning: false }));
-                    addOutput('  ✗ Quantum container not available. Ensure Docker is running.', 'red');
+                    addOutput('  [-] quantum container not available. ensure Docker is running.', 'red');
                     return;
                 }
                 try {
                     const events = extractEvents(targetFile);
-                    addOutput(`  Extracted ${events.length} events from ${targetFile}`, 'gray');
+                    addOutput(`  extracted ${events.length} events from ${targetFile}`, 'gray');
                     const circuit = await quantumService.getCircuitDiagram(4, 6);
                     setState(s => ({ ...s, quantumCircuit: circuit, quantumBackend: config.get('quantumBackend') }));
                     setLoading(false);
@@ -407,10 +527,10 @@ function App() {
                     if (finalJob.results) {
                         addOutput([
                             '',
-                            `  Quantum classification complete!`,
-                            `  Signal events: ${finalJob.results.signalCount} (${(finalJob.results.signalProbability * 100).toFixed(1)}%)`,
-                            `  Background: ${finalJob.results.backgroundCount}`,
-                            `  Fidelity: ${finalJob.results.fidelity.toFixed(3)}`,
+                            `  quantum classification complete`,
+                            `  signal events: ${finalJob.results.signalCount} (${(finalJob.results.signalProbability * 100).toFixed(1)}%)`,
+                            `  background: ${finalJob.results.backgroundCount}`,
+                            `  fidelity: ${finalJob.results.fidelity.toFixed(3)}`,
                             '',
                         ], 'green');
                     }
@@ -418,7 +538,7 @@ function App() {
                 catch (err) {
                     setLoading(false);
                     setState(s => ({ ...s, quantumRunning: false }));
-                    addOutput(`  ✗ ${err.message}`, 'red');
+                    addOutput(`  [-] ${err.message}`, 'red');
                 }
                 return;
             }
@@ -426,7 +546,7 @@ function App() {
                 const fileArg = args.find(a => !a.startsWith('-')) || '';
                 const forceBrowser = args.includes('--browser');
                 if (!fileArg) {
-                    addOutput('  Usage: /viz <file.json>', 'yellow');
+                    addOutput('  usage: /viz <file.json>', 'yellow');
                     return;
                 }
                 const result = openViz(fileArg, forceBrowser);
@@ -439,12 +559,12 @@ function App() {
             case '/download': {
                 addOutput([
                     '',
-                    '  /download — CERN Open Data',
-                    '  ──────────────────────────────────────',
-                    '  Requires the OpenCERN API container to be running.',
-                    `  Searching for: "${argStr || 'all datasets'}"`,
+                    '  /download -- CERN Open Data',
+                    '  ────────────────────────────────────────',
+                    '  requires the OpenCERN API container.',
+                    `  searching for: "${argStr || 'all datasets'}"`,
                     '',
-                    '  Note: Connect to the API with /status, then retry.',
+                    '  check /status, then retry.',
                     '',
                 ], 'yellow');
                 return;
@@ -452,52 +572,28 @@ function App() {
             case '/process': {
                 addOutput([
                     '',
-                    '  /process — ROOT File Processing',
-                    '  ──────────────────────────────────────',
-                    '  Requires the OpenCERN API container to be running.',
-                    '  Start it with Docker, then retry.',
+                    '  /process -- ROOT File Processing',
+                    '  ────────────────────────────────────────',
+                    '  requires the OpenCERN API container.',
+                    '  start Docker, then retry.',
                     '',
                 ], 'yellow');
                 return;
             }
             default: {
-                // Free-form question — route to /ask
+                // Free-form question -> agentic AI
                 if (!input.startsWith('/')) {
-                    setState(s => ({ ...s, view: 'ask', aiTokens: '', aiStreaming: true, promptDisabled: true }));
-                    abortRef.current = new AbortController();
-                    const start = Date.now();
-                    try {
-                        const { totalTokens } = await askQuestion(input, {}, anthropicService.getContext(), token => setState(s => ({ ...s, aiTokens: s.aiTokens + token })), abortRef.current.signal);
-                        setState(s => ({
-                            ...s,
-                            aiStreaming: false,
-                            aiTokenCount: totalTokens,
-                            aiLatency: Date.now() - start,
-                            promptDisabled: false,
-                        }));
-                    }
-                    catch (err) {
-                        setState(s => ({ ...s, aiStreaming: false, promptDisabled: false }));
-                        if (err.message.includes('API key')) {
-                            addOutput([
-                                '  No Anthropic API key configured.',
-                                '  Run /config to set it up, then ask your question again.',
-                            ], 'yellow');
-                        }
-                        else {
-                            addOutput(`  ✗ ${err.message}`, 'red');
-                        }
-                    }
+                    await runAgenticQuery(input);
                     return;
                 }
-                addOutput(`  Unknown command: ${cmd}. Type /help for available commands.`, 'yellow');
+                addOutput(`  unknown command: ${cmd}. type /help for available commands.`, 'yellow');
                 return;
             }
         }
     }
-    const { output, isLoading, loadingMsg, showPalette, paletteQuery, view, aiTokens, aiStreaming, aiTokenCount, aiLatency, fileContent, progress, quantumJob, quantumRunning, quantumBackend, quantumCircuit, promptDisabled } = state;
+    const { output, isLoading, loadingMsg, view, aiTokens, aiStreaming, aiTokenCount, aiLatency, pendingTool, toolResults, fileContent, progress, quantumJob, quantumRunning, quantumBackend, quantumCircuit, promptDisabled } = state;
     const model = config.get('defaultModel');
-    return (_jsxs(Box, { flexDirection: "column", padding: 0, children: [_jsx(StatusBar, {}), _jsx(Box, { flexDirection: "column", paddingX: 1, marginY: 0, minHeight: 3, children: output.slice(-30).map((line, i) => (_jsx(Text, { color: line.color || 'white', bold: line.bold, children: line.text }, i))) }), (view === 'ask' || view === 'opask') && (aiTokens || aiStreaming) && (_jsxs(Box, { flexDirection: view === 'opask' ? 'row' : 'column', paddingX: 1, children: [_jsx(Box, { flexDirection: "column", flexGrow: 1, children: _jsx(AIStream, { tokens: aiTokens, isStreaming: aiStreaming, onCancel: () => { abortRef.current?.abort(); setState(s => ({ ...s, aiStreaming: false })); }, model: model, tokenCount: aiTokenCount, latency: aiLatency }) }), view === 'opask' && fileContent && (_jsx(Box, { flexDirection: "column", flexGrow: 1, marginLeft: 2, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, focused: false }) }))] })), view === 'open' && fileContent && (_jsx(Box, { paddingX: 1, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, onClose: () => setState(s => ({ ...s, view: 'home', fileContent: undefined })) }) })), view === 'quantum' && (_jsx(Box, { paddingX: 1, children: _jsx(QuantumPanel, { job: quantumJob, isRunning: quantumRunning, backend: quantumBackend, circuitDiagram: quantumCircuit }) })), progress && (_jsx(Box, { paddingX: 1, children: _jsx(ProgressBar, { label: progress.label, percent: progress.percent, speed: progress.speed, eta: progress.eta, mode: progress.mode }) })), isLoading && (_jsxs(Box, { paddingX: 1, children: [_jsx(Text, { color: "blue", children: _jsx(Spinner, { type: "dots" }) }), _jsxs(Text, { color: "gray", children: ["  ", loadingMsg] })] })), showPalette && (_jsx(Box, { paddingX: 1, children: _jsx(CommandPalette, { query: paletteQuery, onSelect: handlePaletteSelect, onDismiss: () => setState(s => ({ ...s, showPalette: false, paletteQuery: '' })) }) })), _jsx(Box, { paddingX: 1, marginTop: 0, children: _jsx(Prompt, { onSubmit: handleInput, onSlash: handleSlash, disabled: promptDisabled, placeholder: promptDisabled ? 'Processing... (Esc to cancel)' : undefined }) })] }));
+    return (_jsxs(Box, { flexDirection: "column", padding: 0, children: [_jsx(StatusBar, {}), _jsx(Box, { flexDirection: "column", paddingX: 1, marginY: 0, minHeight: 3, children: output.slice(-30).map((line, i) => (_jsx(Text, { color: line.color || 'white', bold: line.bold, children: line.text }, i))) }), (view === 'ask' || view === 'opask') && (aiTokens || aiStreaming || pendingTool) && (_jsxs(Box, { flexDirection: view === 'opask' ? 'row' : 'column', paddingX: 1, children: [_jsx(Box, { flexDirection: "column", flexGrow: 1, children: _jsx(AIStream, { tokens: aiTokens, isStreaming: aiStreaming, onCancel: () => { abortRef.current?.abort(); setState(s => ({ ...s, aiStreaming: false })); }, model: model, tokenCount: aiTokenCount, latency: aiLatency, pendingTool: pendingTool, toolResults: toolResults, onApprove: handleApprove, onDeny: handleDeny }) }), view === 'opask' && fileContent && (_jsx(Box, { flexDirection: "column", flexGrow: 1, marginLeft: 2, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, focused: false }) }))] })), view === 'open' && fileContent && (_jsx(Box, { paddingX: 1, children: _jsx(FilePreview, { content: fileContent.content, filename: fileContent.filename, size: fileContent.size, fileType: fileContent.fileType, onClose: () => setState(s => ({ ...s, view: 'home', fileContent: undefined })) }) })), view === 'quantum' && (_jsx(Box, { paddingX: 1, children: _jsx(QuantumPanel, { job: quantumJob, isRunning: quantumRunning, backend: quantumBackend, circuitDiagram: quantumCircuit }) })), progress && (_jsx(Box, { paddingX: 1, children: _jsx(ProgressBar, { label: progress.label, percent: progress.percent, speed: progress.speed, eta: progress.eta, mode: progress.mode }) })), isLoading && (_jsxs(Box, { paddingX: 1, children: [_jsx(Text, { color: "blue", children: _jsx(Spinner, { type: "dots" }) }), _jsxs(Text, { color: "gray", children: ["  ", loadingMsg] })] })), _jsx(Text, { color: "gray", dimColor: true, children: '  ' + '─'.repeat(76) }), _jsx(Box, { paddingX: 1, marginTop: 0, children: _jsx(Prompt, { onSubmit: handleInput, disabled: promptDisabled, placeholder: promptDisabled ? (pendingTool ? 'Enter to approve, Esc to skip' : 'Processing... (Esc to cancel)') : undefined }) })] }));
 }
 export async function startApp() {
     const { waitUntilExit } = render(_jsx(App, {}));

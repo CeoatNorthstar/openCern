@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import { execSync } from 'child_process';
 import { docker } from '../services/docker.js';
 import { isAuthenticated } from '../utils/auth.js';
@@ -89,7 +92,7 @@ export function formatDoctorResults(checks: DoctorCheck[]): string[] {
   let hasIssues = false;
 
   for (const check of checks) {
-    const icon = check.status === 'ok' ? '✓' : check.status === 'warning' ? '⚠' : '✗';
+    const icon = check.status === 'ok' ? '[+]' : check.status === 'warning' ? '[~]' : '[-]';
     lines.push(`  ${icon} ${check.name.padEnd(22)} ${check.message}`);
     if (check.fix) {
       lines.push(`      → ${check.fix}`);

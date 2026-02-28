@@ -1,3 +1,11 @@
+/**
+ * Copyright (c) 2026 OpenCERN. All Rights Reserved.
+ *
+ * PROPRIETARY AND CONFIDENTIAL — Enterprise Component
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ * See LICENSE.enterprise for full terms.
+ */
+
 import { readFileSync, existsSync, statSync } from 'fs';
 import { cernApi } from '../services/cern-api.js';
 import type { LocalFile } from '../services/cern-api.js';

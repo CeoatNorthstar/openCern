@@ -14,4 +14,13 @@ export declare function setConfigValue(key: string, value: string): Promise<{
 }>;
 export declare function showConfig(): string[];
 export declare function resetConfig(): void;
+export declare function getKeyStatus(): string[];
+export declare function setApiKey(provider: string, key: string): {
+    success: boolean;
+    message: string;
+};
+export declare function removeApiKey(provider: string): {
+    success: boolean;
+    message: string;
+};
 //# sourceMappingURL=config.d.ts.map

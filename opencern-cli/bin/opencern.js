@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
 
 // Node.js version check
 const [major] = process.versions.node.split('.').map(Number);

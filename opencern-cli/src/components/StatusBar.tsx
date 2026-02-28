@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { docker } from '../services/docker.js';
@@ -36,42 +39,34 @@ export function StatusBar(): React.JSX.Element {
   }, []);
 
   const model = config.get('defaultModel');
-  const shortModel = model.replace('claude-', '').replace(/-4-\d.*/, ' 4.x');
+  const shortModel = model.replace('claude-', '').replace(/-\d{8}$/, '');
+
+  // Status indicators — clean unicode, no emojis
+  const dot = (ok: boolean, checking: boolean) =>
+    checking ? '~' : ok ? '+' : '-';
 
   const dockerColor = status.checking ? 'yellow' : status.dockerRunning ? 'green' : 'red';
-  const dockerLabel = status.checking ? '...' : status.dockerRunning ? '✓' : '✗';
-
   const apiColor = status.checking ? 'yellow' : status.apiReady ? 'green' : 'red';
-  const apiLabel = status.checking ? '...' : status.apiReady ? '✓' : '✗';
-
-  const quantumLabel = status.quantumReady ? config.get('quantumBackend') : 'offline';
   const quantumColor = status.quantumReady ? 'green' : 'gray';
-
-  const authLabel = status.authStatus ? 'signed in' : 'not signed in';
   const authColor = status.authStatus ? 'green' : 'yellow';
 
   return (
-    <Box
-      borderStyle="single"
-      borderColor="gray"
-      paddingX={1}
-      flexDirection="row"
-      justifyContent="space-between"
-    >
-      <Box gap={1}>
-        <Text bold color="cyan">opencern</Text>
-        <Text color="gray">│</Text>
-        <Text color={dockerColor}>Docker {dockerLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={apiColor}>API {apiLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={quantumColor}>Quantum: {quantumLabel}</Text>
-        <Text color="gray">│</Text>
-        <Text color={authColor}>{authLabel}</Text>
-      </Box>
-      <Box>
+    <Box flexDirection="column">
+      <Box flexDirection="row" justifyContent="space-between" paddingX={2}>
+        <Box gap={1}>
+          <Text bold color="cyan">opencern</Text>
+          <Text color="gray" dimColor>|</Text>
+          <Text color={dockerColor}>docker {dot(status.dockerRunning, status.checking)}</Text>
+          <Text color="gray" dimColor>|</Text>
+          <Text color={apiColor}>api {dot(status.apiReady, status.checking)}</Text>
+          <Text color="gray" dimColor>|</Text>
+          <Text color={quantumColor}>qc {dot(status.quantumReady, status.checking)}</Text>
+          <Text color="gray" dimColor>|</Text>
+          <Text color={authColor}>{status.authStatus ? 'authenticated' : 'not signed in'}</Text>
+        </Box>
         <Text color="gray" dimColor>{shortModel}</Text>
       </Box>
+      <Text color="gray" dimColor>{'  ' + '─'.repeat(76)}</Text>
     </Box>
   );
 }

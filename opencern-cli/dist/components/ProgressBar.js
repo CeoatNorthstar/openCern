@@ -1,4 +1,4 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
 import { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -16,13 +16,13 @@ function formatEta(seconds) {
         return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
-function modeIcon(mode) {
+function modeLabel(mode) {
     switch (mode) {
-        case 'download': return '⬇';
-        case 'upload': return '⬆';
-        case 'quantum': return '⚛';
-        case 'process': return '⚙';
-        default: return '●';
+        case 'download': return 'dl';
+        case 'upload': return 'up';
+        case 'quantum': return 'qc';
+        case 'process': return 'op';
+        default: return '--';
     }
 }
 export function ProgressBar({ label, percent, speed, eta, mode, indeterminate = false, done = false, error = false, }) {
@@ -39,8 +39,8 @@ export function ProgressBar({ label, percent, speed, eta, mode, indeterminate = 
     const filled = Math.round((Math.min(percent, 100) / 100) * barWidth);
     const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
     const color = error ? 'red' : done ? 'green' : 'blue';
-    const icon = modeIcon(mode);
-    return (_jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { children: icon }), _jsx(Text, { color: done ? 'green' : error ? 'red' : 'white', children: label }), indeterminate ? (_jsx(Text, { color: color, children: SPINNER_FRAMES[spinnerFrame] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { color: color, children: ["[", bar, "]"] }), _jsxs(Text, { color: color, children: [Math.round(percent), "%"] })] })), speed !== undefined && _jsx(Text, { color: "gray", children: formatSpeed(speed) }), eta !== undefined && eta > 0 && !done && (_jsxs(Text, { color: "gray", children: ["ETA ", formatEta(eta)] }))] }));
+    const tag = modeLabel(mode);
+    return (_jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsxs(Text, { color: "gray", children: ["[", tag, "]"] }), _jsx(Text, { color: done ? 'green' : error ? 'red' : 'white', children: label }), indeterminate ? (_jsx(Text, { color: color, children: SPINNER_FRAMES[spinnerFrame] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { color: color, children: ["[", bar, "]"] }), _jsxs(Text, { color: color, children: [Math.round(percent), "%"] })] })), speed !== undefined && _jsx(Text, { color: "gray", children: formatSpeed(speed) }), eta !== undefined && eta > 0 && !done && (_jsxs(Text, { color: "gray", children: ["ETA ", formatEta(eta)] }))] }));
 }
 export default ProgressBar;
 //# sourceMappingURL=ProgressBar.js.map

@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ToolCall, ToolResult } from '../services/anthropic.js';
 interface AIStreamProps {
     tokens: string;
     isStreaming: boolean;
@@ -6,7 +7,12 @@ interface AIStreamProps {
     model?: string;
     tokenCount?: number;
     latency?: number;
+    pendingTool?: ToolCall | null;
+    toolResults?: ToolResult[];
+    onApprove?: () => void;
+    onDeny?: () => void;
+    thinkingText?: string;
 }
-export declare function AIStream({ tokens, isStreaming, onCancel, model, tokenCount, latency, }: AIStreamProps): React.JSX.Element;
+export declare function AIStream({ tokens, isStreaming, onCancel, model, tokenCount, latency, pendingTool, toolResults, onApprove, onDeny, thinkingText, }: AIStreamProps): React.JSX.Element;
 export default AIStream;
 //# sourceMappingURL=AIStream.d.ts.map

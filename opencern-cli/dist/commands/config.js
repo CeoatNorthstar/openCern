@@ -1,4 +1,4 @@
-import { setKey, getKey, hasKey, maskKey } from '../utils/keystore.js';
+import { setKey, getKey, hasKey, maskKey, deleteKey } from '../utils/keystore.js';
 import { config } from '../utils/config.js';
 import axios from 'axios';
 export function getConfigItems() {
@@ -14,7 +14,7 @@ export function getConfigItems() {
         {
             key: 'ibm-quantum-key',
             label: 'IBM Quantum API Key',
-            description: 'Optional — for real quantum hardware via IBM',
+            description: 'Optional -- for real quantum hardware via IBM',
             type: 'secret',
             required: false,
             current: hasKey('ibm-quantum') ? maskKey(getKey('ibm-quantum') || '') : 'Not set',
@@ -100,7 +100,11 @@ export async function setConfigValue(key, value) {
 }
 export function showConfig() {
     const items = getConfigItems();
-    const lines = ['', '  Current Configuration', '  ─────────────────────────────────────'];
+    const lines = [
+        '',
+        '  Configuration',
+        '  ────────────────────────────────────────',
+    ];
     for (const item of items) {
         lines.push(`  ${item.label.padEnd(25)} ${item.current || 'Not set'}`);
     }
@@ -109,5 +113,60 @@ export function showConfig() {
 }
 export function resetConfig() {
     config.reset();
+}
+// ─── Key Management ──────────────────────────────────────────────────
+export function getKeyStatus() {
+    const lines = [
+        '',
+        '  API Keys',
+        '  ────────────────────────────────────────',
+    ];
+    const keys = [
+        { name: 'Anthropic', service: 'anthropic' },
+        { name: 'IBM Quantum', service: 'ibm-quantum' },
+        { name: 'OpenCERN Token', service: 'opencern-token' },
+    ];
+    for (const k of keys) {
+        const set = hasKey(k.service);
+        const status = set ? maskKey(getKey(k.service) || '') : 'not configured';
+        const indicator = set ? '[+]' : '[-]';
+        lines.push(`  ${indicator} ${k.name.padEnd(20)} ${status}`);
+    }
+    lines.push('');
+    lines.push('  Set keys:  /keys set anthropic <key>');
+    lines.push('             /keys set ibm-quantum <key>');
+    lines.push('  Remove:    /keys remove anthropic');
+    lines.push('');
+    return lines;
+}
+export function setApiKey(provider, key) {
+    const providerMap = {
+        'anthropic': 'anthropic',
+        'ibm': 'ibm-quantum',
+        'ibm-quantum': 'ibm-quantum',
+        'ibmq': 'ibm-quantum',
+    };
+    const service = providerMap[provider.toLowerCase()];
+    if (!service) {
+        return { success: false, message: `Unknown provider: ${provider}. Use: anthropic, ibm-quantum` };
+    }
+    setKey(service, key);
+    const displayName = service === 'anthropic' ? 'Anthropic' : 'IBM Quantum';
+    return { success: true, message: `${displayName} API key stored securely.` };
+}
+export function removeApiKey(provider) {
+    const providerMap = {
+        'anthropic': 'anthropic',
+        'ibm': 'ibm-quantum',
+        'ibm-quantum': 'ibm-quantum',
+        'ibmq': 'ibm-quantum',
+    };
+    const service = providerMap[provider.toLowerCase()];
+    if (!service) {
+        return { success: false, message: `Unknown provider: ${provider}. Use: anthropic, ibm-quantum` };
+    }
+    deleteKey(service);
+    const displayName = service === 'anthropic' ? 'Anthropic' : 'IBM Quantum';
+    return { success: true, message: `${displayName} API key removed.` };
 }
 //# sourceMappingURL=config.js.map

@@ -5,10 +5,9 @@ import { homedir } from 'os';
 import axios from 'axios';
 import { config } from '../utils/config.js';
 const COMPOSE_FILE = join(homedir(), '.opencern', 'docker-compose.yml');
-const DOCKER_COMPOSE_TEMPLATE = `version: '3.8'
-services:
+const DOCKER_COMPOSE_TEMPLATE = `services:
   api:
-    image: opencernhq/api:latest
+    image: ghcr.io/ceoatnorthstar/api:latest
     container_name: opencern-api
     ports:
       - "8080:8080"
@@ -17,14 +16,14 @@ services:
     restart: unless-stopped
 
   xrootd:
-    image: opencernhq/xrootd:latest
+    image: ghcr.io/ceoatnorthstar/xrootd:latest
     container_name: opencern-xrootd
     ports:
       - "8081:8081"
     restart: unless-stopped
 
   streamer:
-    image: opencernhq/streamer:latest
+    image: ghcr.io/ceoatnorthstar/streamer:latest
     container_name: opencern-streamer
     ports:
       - "9001:9001"
@@ -33,7 +32,7 @@ services:
 `;
 const QUANTUM_SERVICE = `
   quantum:
-    image: opencernhq/quantum:latest
+    image: ghcr.io/ceoatnorthstar/quantum:latest
     container_name: opencern-quantum
     ports:
       - "8082:8082"
@@ -68,10 +67,10 @@ export const docker = {
     },
     async pullImages(includeQuantum = false) {
         const images = [
-            'opencernhq/api:latest',
-            'opencernhq/xrootd:latest',
-            'opencernhq/streamer:latest',
-            ...(includeQuantum ? ['opencernhq/quantum:latest'] : []),
+            'ghcr.io/ceoatnorthstar/api:latest',
+            'ghcr.io/ceoatnorthstar/xrootd:latest',
+            'ghcr.io/ceoatnorthstar/streamer:latest',
+            ...(includeQuantum ? ['ghcr.io/ceoatnorthstar/quantum:latest'] : []),
         ];
         for (const image of images) {
             execSync(`docker pull ${image}`, { stdio: 'inherit' });

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { platform } from 'os';

@@ -18,14 +18,18 @@ export async function POST(request) {
 
     const response = await fetch(CLAUDE_TOKEN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Claude/4.10.1 (mcp-client)',
+        'Origin': 'http://localhost:54545',
+      },
+      body: new URLSearchParams({
         client_id: CLIENT_ID,
+        grant_type: 'authorization_code',
         code,
-        code_verifier: codeVerifier,
         redirect_uri: redirectUri,
-      }),
+        code_verifier: codeVerifier,
+      }).toString(),
     });
 
     if (!response.ok) {

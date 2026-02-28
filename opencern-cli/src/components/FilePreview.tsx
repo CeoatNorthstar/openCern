@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 

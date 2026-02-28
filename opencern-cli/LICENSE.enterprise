@@ -1,0 +1,116 @@
+OPENCERN ENTERPRISE SOURCE LICENSE
+
+Copyright (c) 2026 OpenCERN. All Rights Reserved.
+
+NOTICE: The Enterprise Components identified in Section 3 below are proprietary
+and confidential source code belonging to OpenCERN. Access to this source code
+does not constitute a license to use, copy, modify, or distribute it.
+
+────────────────────────────────────────────────────────────────────────────────
+
+1. GRANT OF LIMITED VIEW LICENSE
+
+   Subject to the terms of this License, OpenCERN grants you a non-exclusive,
+   non-transferable, revocable right to VIEW the source code of the Enterprise
+   Components solely for the purpose of understanding integration points with
+   the Open Source Components. This view license grants no other rights.
+
+2. RESTRICTIONS
+
+   You may NOT, without prior written consent from OpenCERN:
+
+   a. Copy, reproduce, or distribute the Enterprise Components or any
+      derivative works thereof, in whole or in part.
+
+   b. Modify, adapt, translate, or create derivative works based on the
+      Enterprise Components.
+
+   c. Reverse engineer, decompile, or disassemble the Enterprise Components
+      except to the extent required by applicable law.
+
+   d. Sublicense, sell, rent, lease, or transfer any rights in the Enterprise
+      Components to any third party.
+
+   e. Remove, alter, or obscure any proprietary notices, copyright notices,
+      license headers, or other legal markings from the Enterprise Components.
+
+   f. Use the Enterprise Components to build a product or service that competes
+      with OpenCERN or any OpenCERN product.
+
+   g. Incorporate the Enterprise Components into any open-source project or
+      distribute them under any open-source license.
+
+3. ENTERPRISE COMPONENTS
+
+   The following files are Enterprise Components governed exclusively by this
+   license. The complete and authoritative list is maintained in
+   docs/OPEN_SOURCE_BOUNDARY.md.
+
+   Core Application:
+     src/app.tsx                      — Agentic REPL orchestration loop
+
+   Services (src/services/):
+     anthropic.ts                     — AI integration, system prompts, tool definitions
+     executor.ts                      — Sandboxed code execution engine
+     cern-api.ts                      — Internal CERN data API client
+     quantum.ts                       — Quantum ML service integration
+     docker.ts                        — Container orchestration configuration
+
+   Utilities (src/utils/):
+     keystore.ts                      — Secure multi-platform credential storage
+     auth.ts                          — Authentication token management
+
+   Commands (src/commands/):
+     auth.ts                          — OAuth2 device code flow
+     ask.ts                           — AI analysis orchestration
+     opask.ts                         — File + AI combined analysis
+     quantum.ts                       — Quantum classification orchestration
+     download.ts                      — Dataset download pipeline
+     process.ts                       — ROOT file data processing
+     config.ts                        — API key and configuration management
+     open.ts                          — File opening with CERN API integration
+
+4. OWNERSHIP
+
+   All right, title, and interest in and to the Enterprise Components,
+   including all intellectual property rights, are and shall remain exclusively
+   with OpenCERN. Nothing in this License transfers any ownership interest to
+   you.
+
+5. NO WARRANTY
+
+   THE ENTERPRISE COMPONENTS ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED. OPENCERN EXPRESSLY DISCLAIMS ALL WARRANTIES, INCLUDING
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+   NON-INFRINGEMENT. IN NO EVENT SHALL OPENCERN BE LIABLE FOR ANY INDIRECT,
+   INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING FROM YOUR
+   ACCESS TO OR USE OF THE ENTERPRISE COMPONENTS.
+
+6. TERMINATION
+
+   This License and your rights hereunder terminate automatically and
+   immediately if you breach any term of this License. Upon termination, you
+   must immediately cease all access to and use of the Enterprise Components
+   and destroy any copies in your possession or control. Sections 2, 4, 5, 7,
+   and 8 survive termination.
+
+7. GOVERNING LAW AND JURISDICTION
+
+   This License shall be governed by and construed in accordance with the laws
+   of Switzerland, without regard to its conflict of law provisions. Any
+   disputes arising under this License shall be subject to the exclusive
+   jurisdiction of the courts of Geneva, Switzerland.
+
+8. ENTIRE AGREEMENT
+
+   This License constitutes the entire agreement between you and OpenCERN with
+   respect to the Enterprise Components and supersedes all prior and
+   contemporaneous agreements, representations, and understandings.
+
+────────────────────────────────────────────────────────────────────────────────
+For enterprise licensing, partnership inquiries, or written consent requests:
+  legal@opencern.io
+
+For security vulnerability disclosures (do not open a public issue):
+  security@opencern.io
+────────────────────────────────────────────────────────────────────────────────

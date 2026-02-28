@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 OpenCERN Contributors
+
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 
@@ -99,7 +102,7 @@ export function DataTable({
                 color={isSelected ? 'cyan' : rowIdx % 2 === 0 ? 'white' : 'gray'}
                 bold={isSelected}
               >
-                {isSelected && i === 0 ? '▶' : ' '}{renderCell(col, row[col.key], colWidths[i])}{' '}
+                {isSelected && i === 0 ? '>' : ' '}{renderCell(col, row[col.key], colWidths[i])}{' '}
               </Text>
             ))}
           </Box>

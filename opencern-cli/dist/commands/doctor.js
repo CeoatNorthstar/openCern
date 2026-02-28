@@ -73,7 +73,7 @@ export function formatDoctorResults(checks) {
     const lines = ['', '  OpenCERN Doctor', '  ─────────────────────────────────────'];
     let hasIssues = false;
     for (const check of checks) {
-        const icon = check.status === 'ok' ? '✓' : check.status === 'warning' ? '⚠' : '✗';
+        const icon = check.status === 'ok' ? '[+]' : check.status === 'warning' ? '[~]' : '[-]';
         lines.push(`  ${icon} ${check.name.padEnd(22)} ${check.message}`);
         if (check.fix) {
             lines.push(`      → ${check.fix}`);
