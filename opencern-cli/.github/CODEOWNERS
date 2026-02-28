@@ -1,0 +1,75 @@
+# CODEOWNERS — OpenCERN CLI
+#
+# NOTE: For GitHub to enforce this, the file must be at the repository root
+# (.github/CODEOWNERS) or docs/CODEOWNERS. This file lives inside opencern-cli/
+# which is a monorepo subdirectory. Move this file to the repo root when
+# publishing the open-source package as a standalone repository.
+#
+# Format: <pattern> <owner>
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ─── Default owner (enterprise team reviews everything) ─────────────────────
+*                                   @opencern/core-team
+
+# ─── Open Source Components (community PRs + enterprise review) ─────────────
+
+# UI components — community maintainers can approve
+src/components/                     @opencern/core-team @opencern/ui-maintainers
+src/components/AIStream.tsx         @opencern/core-team
+src/components/CommandPalette.tsx   @opencern/core-team @opencern/ui-maintainers
+src/components/DataTable.tsx        @opencern/core-team @opencern/ui-maintainers
+src/components/FilePreview.tsx      @opencern/core-team @opencern/ui-maintainers
+src/components/ProgressBar.tsx      @opencern/core-team @opencern/ui-maintainers
+src/components/Prompt.tsx           @opencern/core-team @opencern/ui-maintainers
+src/components/QuantumPanel.tsx     @opencern/core-team @opencern/ui-maintainers
+src/components/StatusBar.tsx        @opencern/core-team @opencern/ui-maintainers
+
+# General utilities
+src/utils/config.ts                 @opencern/core-team @opencern/ui-maintainers
+src/utils/history.ts                @opencern/core-team @opencern/ui-maintainers
+
+# Informational commands
+src/commands/doctor.ts              @opencern/core-team @opencern/ui-maintainers
+src/commands/help.ts                @opencern/core-team @opencern/ui-maintainers
+src/commands/status.ts              @opencern/core-team @opencern/ui-maintainers
+src/commands/update.ts              @opencern/core-team @opencern/ui-maintainers
+src/commands/viz.ts                 @opencern/core-team @opencern/ui-maintainers
+
+# Entry point
+bin/opencern.js                     @opencern/core-team @opencern/ui-maintainers
+
+# Public documentation
+README.md                           @opencern/core-team @opencern/ui-maintainers
+CONTRIBUTING.md                     @opencern/core-team
+docs/                               @opencern/core-team
+
+# ─── Enterprise Components (core team ONLY — no community PRs) ──────────────
+
+# Core REPL — requires two core team approvals
+src/app.tsx                         @opencern/core-team
+
+# Services — requires security review + core team approval
+src/services/                       @opencern/core-team @opencern/security-team
+src/services/anthropic.ts           @opencern/core-team @opencern/ai-team
+src/services/executor.ts            @opencern/core-team @opencern/security-team
+src/services/cern-api.ts            @opencern/core-team @opencern/backend-team
+src/services/docker.ts              @opencern/core-team @opencern/backend-team
+src/services/quantum.ts             @opencern/core-team @opencern/quantum-team
+
+# Security-sensitive utilities
+src/utils/keystore.ts               @opencern/core-team @opencern/security-team
+src/utils/auth.ts                   @opencern/core-team @opencern/security-team
+
+# Enterprise commands
+src/commands/auth.ts                @opencern/core-team @opencern/security-team
+src/commands/ask.ts                 @opencern/core-team @opencern/ai-team
+src/commands/opask.ts               @opencern/core-team @opencern/ai-team
+src/commands/quantum.ts             @opencern/core-team @opencern/quantum-team
+src/commands/download.ts            @opencern/core-team @opencern/backend-team
+src/commands/process.ts             @opencern/core-team @opencern/backend-team
+src/commands/config.ts              @opencern/core-team @opencern/security-team
+src/commands/open.ts                @opencern/core-team @opencern/backend-team
+
+# Licensing and governance — core team ONLY
+LICENSE                             @opencern/core-team
+LICENSE.enterprise                  @opencern/core-team

@@ -1,19 +1,30 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
 import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+import { buildSystemPrompt } from './aiSystemPrompt';
+import './AIChat.css';
+
+// Monaco wrapper that loads the editor entirely at runtime to avoid Turbopack
+// trying to resolve the CDN URL inside @monaco-editor/loader as a filesystem path.
+const Editor = dynamic(() => import('./MonacoEditor'), { ssr: false });
 
 const ParticleVisualization = dynamic(() => import('./ParticleVisualization'), {
   ssr: false,
 });
 
 const formatSize = (bytes) => {
-  if (!bytes) return 'Unknown';
-  const mb = bytes / (1024 * 1024);
-  return mb > 1000 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(1)} MB`;
+  if (!bytes || bytes <= 0) return 'Unknown';
+  const tb = bytes / (1024 ** 4);
+  if (tb >= 1) return `${tb.toFixed(1)} TB`;
+  const gb = bytes / (1024 ** 3);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 ** 2);
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  const kb = bytes / 1024;
+  return `${kb.toFixed(0)} KB`;
 };
 
 // --- SVG Icons ---
@@ -161,6 +172,111 @@ const Logo = () => (
   </svg>
 );
 
+const IconAI = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
+    <path d="M6 10a6 6 0 0 0 12 0"></path>
+    <line x1="12" y1="16" x2="12" y2="22"></line>
+    <path d="M8 22h8"></path>
+    <circle cx="6" cy="6" r="1"></circle>
+    <circle cx="18" cy="6" r="1"></circle>
+  </svg>
+);
+
+const AI_SUGGESTIONS = [
+  'Analyze my processed data and find interesting physics',
+  'Explain the Higgs boson decay to two photons',
+  'What cuts should I use for Z→μμ?',
+];
+
+// OAuth PKCE helpers
+const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const CLAUDE_AUTH_URL = 'https://claude.ai/oauth/authorize';
+
+function generateCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function generateCodeChallenge(verifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+
+// Simple markdown renderer for AI responses
+function renderAIMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const elements = [];
+  let inCodeBlock = false;
+  let codeLines = [];
+  let codeLang = '';
+  let key = 0;
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        elements.push(
+          <pre key={key++} style={{ background: '#0d0d12', border: '1px solid #1e1e28', borderRadius: '8px', padding: '14px 16px', margin: '10px 0', overflowX: 'auto', fontSize: '13px', lineHeight: 1.5 }}>
+            <code>{codeLines.join('\n')}</code>
+          </pre>
+        );
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+        codeLang = line.slice(3).trim();
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+    // Headers
+    if (line.startsWith('### ')) {
+      elements.push(<h4 key={key++} style={{ fontSize: '14px', fontWeight: 600, color: '#f3f4f6', margin: '14px 0 6px' }}>{line.slice(4)}</h4>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h3 key={key++} style={{ fontSize: '15px', fontWeight: 600, color: '#f3f4f6', margin: '16px 0 8px' }}>{line.slice(3)}</h3>);
+    } else if (line.startsWith('# ')) {
+      elements.push(<h2 key={key++} style={{ fontSize: '16px', fontWeight: 700, color: '#f3f4f6', margin: '18px 0 10px' }}>{line.slice(2)}</h2>);
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      elements.push(<div key={key++} style={{ paddingLeft: '16px', margin: '2px 0' }}>• {renderInlineMarkdown(line.slice(2))}</div>);
+    } else if (/^\d+\.\s/.test(line)) {
+      const match = line.match(/^(\d+)\.\s(.*)/);
+      elements.push(<div key={key++} style={{ paddingLeft: '16px', margin: '2px 0' }}>{match[1]}. {renderInlineMarkdown(match[2])}</div>);
+    } else if (line.trim() === '') {
+      elements.push(<div key={key++} style={{ height: '8px' }} />);
+    } else {
+      elements.push(<p key={key++} style={{ margin: '4px 0', lineHeight: 1.65 }}>{renderInlineMarkdown(line)}</p>);
+    }
+  }
+
+  if (inCodeBlock && codeLines.length) {
+    elements.push(
+      <pre key={key++} style={{ background: '#0d0d12', border: '1px solid #1e1e28', borderRadius: '8px', padding: '14px 16px', margin: '10px 0', overflowX: 'auto', fontSize: '13px' }}>
+        <code>{codeLines.join('\n')}</code>
+      </pre>
+    );
+  }
+
+  return elements;
+}
+
+function renderInlineMarkdown(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i} style={{ color: '#f9fafb', fontWeight: 600 }}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={i} style={{ background: '#0d0d12', color: '#a5f3fc', padding: '2px 6px', borderRadius: '4px', fontSize: '13px', fontFamily: "var(--font-geist-mono), 'SF Mono', monospace" }}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**')) return <em key={i}>{part.slice(1, -1)}</em>;
+    return part;
+  });
+}
+
 export default function App() {
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -168,9 +284,13 @@ export default function App() {
   const [downloaded, setDownloaded] = useState([]);
   const [downloading, setDownloading] = useState({});
   const [processing, setProcessing] = useState({});
+  const [filePicker, setFilePicker] = useState(null); // { dataset, selectedFiles: Set }
   const [activeTab, setActiveTab] = useState('browse');
   const [experiment, setExperiment] = useState('All');
   const [showDownloads, setShowDownloads] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalDatasets, setTotalDatasets] = useState(0);
   const [visualizeFile, setVisualizeFile] = useState(null);
   
   // Inspector states
@@ -180,6 +300,353 @@ export default function App() {
   const [inspectorPage, setInspectorPage] = useState(1);
   const [loadingInspector, setLoadingInspector] = useState(false);
   const editorRef = useRef(null);
+
+  // AI Chat state
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiTokens, setAiTokens] = useState('');
+  const [aiTotalTokens, setAiTotalTokens] = useState(0);
+  const [aiInputValue, setAiInputValue] = useState('');
+  const [aiShowSettings, setAiShowSettings] = useState(false);
+  const [aiConfig, setAiConfig] = useState({ apiKey: '', model: 'claude-3-7-sonnet-20250219' });
+  const [aiModels, setAiModels] = useState([]);
+  const [aiError, setAiError] = useState('');
+  const [activeToolExecution, setActiveToolExecution] = useState(null); // Tracks currently running real-world tool execution
+  const aiMessagesEndRef = useRef(null);
+  const aiAbortRef = useRef(null);
+  const aiTextareaRef = useRef(null);
+
+  // Load AI config from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('opencern-ai-config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setAiConfig(prev => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+  }, []);
+
+  // Fetch models from Anthropic when API key changes
+  const DEFAULT_MODELS = [
+    { id: 'claude-sonnet-4-20250514', display_name: 'Claude Sonnet 4' },
+    { id: 'claude-opus-4-20250514', display_name: 'Claude Opus 4' },
+    { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 3.5' },
+  ];
+
+  useEffect(() => {
+    if (!aiConfig.apiKey) { setAiModels(DEFAULT_MODELS); return; }
+    setAiModels(DEFAULT_MODELS); // show defaults immediately
+    let cancelled = false;
+    fetch(`/api/ai/models?apiKey=${encodeURIComponent(aiConfig.apiKey)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.data) return;
+        const models = data.data
+          .filter(m => m.id && m.id.startsWith('claude'))
+          .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        if (models.length > 0) setAiModels(models);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [aiConfig.apiKey]);
+
+  // Auto-scroll AI messages
+  useEffect(() => {
+    aiMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [aiMessages, aiTokens]);
+
+  const saveAiConfig = useCallback((newConfig) => {
+    setAiConfig(newConfig);
+    try {
+      localStorage.setItem('opencern-ai-config', JSON.stringify(newConfig));
+    } catch {}
+  }, []);
+
+  const buildContext = useCallback(() => {
+    return {
+      downloadedDatasets: downloaded.map(d => d.title || d.name || d),
+      totalEvents: inspectorData?.totalEvents,
+      experiment: selected?.experiment,
+    };
+  }, [downloaded, inspectorData, selected]);
+
+  const isAiAuthed = !!aiConfig.apiKey;
+
+
+
+  const sendAiMessage = useCallback(async (content) => {
+    if (!content.trim() || aiStreaming) return;
+    if (!isAiAuthed) {
+      setAiError('Connect your account or add an API key in settings.');
+      return;
+    }
+    setAiError('');
+
+    const userMsg = { role: 'user', content: content.trim(), timestamp: new Date().toISOString() };
+    setAiMessages(prev => [...prev, userMsg]);
+    setAiInputValue('');
+    setAiStreaming(true);
+    setAiTokens('');
+
+    // Pre-process messages to flatten tool invocations into the correct Anthropic format
+    const allMessages = [...aiMessages, userMsg].map(m => {
+      // If it's a standard text message
+      if (typeof m.content === 'string') {
+        return { role: m.role, content: m.content };
+      }
+      // If it's a complex array (tool_use / tool_result)
+      return { role: m.role, content: m.content };
+    });
+
+    const systemPrompt = buildSystemPrompt(buildContext()) + "\n\nYou have access to tools. ALWAYS use them if the user asks you to analyze data, run bash commands, or interact with opencern. DO NOT refuse to run code.";
+
+    try {
+      aiAbortRef.current = new AbortController();
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: allMessages,
+          systemPrompt,
+          model: aiConfig.model,
+          apiKey: aiConfig.apiKey,
+        }),
+        signal: aiAbortRef.current.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to get response');
+      }
+
+      const processStream = async (res) => {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+        let toolInvocations = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'token') {
+                fullText += evt.text;
+                setAiTokens(fullText);
+              } else if (evt.type === 'tool_use') {
+                toolInvocations.push(evt);
+              } else if (evt.type === 'done') {
+                setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
+              } else if (evt.type === 'error') {
+                throw new Error(evt.error);
+              }
+            } catch {}
+          }
+        }
+
+        let finalContent = fullText;
+        if (toolInvocations.length > 0) {
+          // If tools were used, the content array must contain both the text (if any) and the tool_use blocks
+          finalContent = [];
+          if (fullText.trim()) {
+            finalContent.push({ type: 'text', text: fullText.trim() });
+          }
+          finalContent.push(...toolInvocations.map(t => ({
+            type: 'tool_use',
+            id: t.id,
+            name: t.name,
+            input: t.input,
+            status: 'pending' // UI state: pending human approval
+          })));
+        }
+
+        return finalContent;
+      };
+
+      const finalContent = await processStream(res);
+      setAiMessages(prev => [...prev, { role: 'assistant', content: finalContent, timestamp: new Date().toISOString() }]);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setAiMessages(prev => [...prev, { role: 'assistant', content: `⚠️ Error: ${err.message}`, timestamp: new Date().toISOString(), isError: true }]);
+      }
+    } finally {
+      setAiStreaming(false);
+      setAiTokens('');
+    }
+  }, [aiConfig, aiMessages, aiStreaming, buildContext, isAiAuthed]);
+
+  // Handle execution of a pending tool
+  const handleToolAction = useCallback(async (msgIndex, toolIndex, toolObj, action) => {
+    // 1. Mark in UI
+    const updatedMessages = [...aiMessages];
+    const msg = updatedMessages[msgIndex];
+    if (Array.isArray(msg.content)) {
+      msg.content[toolIndex].status = action === 'approve' ? 'running' : 'denied';
+    }
+    setAiMessages(updatedMessages);
+
+    if (action === 'deny') {
+      // Immediately tell anthropic we denied it
+      const toolResultMsg = {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolObj.id,
+          content: 'The user denied the execution of this tool for security reasons.',
+          is_error: true
+        }],
+        timestamp: new Date().toISOString()
+      };
+      // Send background followup without putting the deny message in the UI explicitly (just the card update)
+      sendAiMessageFollowUp([...updatedMessages, toolResultMsg]);
+      return;
+    }
+
+    // Run execution
+    setActiveToolExecution(toolObj.id);
+    try {
+      const res = await fetch('/api/ai/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toolName: toolObj.name,
+          toolInput: toolObj.input
+        })
+      });
+      const data = await res.json();
+      
+      const updatedMessagesPost = [...aiMessages];
+      const msgPost = updatedMessagesPost[msgIndex];
+      if (Array.isArray(msgPost.content)) {
+        msgPost.content[toolIndex].status = data.success ? 'success' : 'failed';
+        msgPost.content[toolIndex].output = data.output;
+        if (data.images?.length > 0) msgPost.content[toolIndex].images = data.images;
+      }
+      setAiMessages(updatedMessagesPost);
+
+      // Tell Anthropic the result so it can summarize
+      let resultText = data.output;
+      if (data.images?.length > 0) {
+        resultText += '\n\n[System: The tool generated images. They have been displayed to the user natively.]';
+      }
+
+      const toolResultMsg = {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolObj.id,
+          content: resultText,
+          is_error: !data.success
+        }],
+        timestamp: new Date().toISOString()
+      };
+      
+      sendAiMessageFollowUp([...updatedMessagesPost, toolResultMsg]);
+
+    } catch (err) {
+      // Network failure
+      const updatedMessagesPost = [...aiMessages];
+      const msgPost = updatedMessagesPost[msgIndex];
+      if (Array.isArray(msgPost.content)) {
+         msgPost.content[toolIndex].status = 'failed';
+         msgPost.content[toolIndex].output = err.message;
+      }
+      setAiMessages(updatedMessagesPost);
+
+      sendAiMessageFollowUp([...updatedMessagesPost, {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: toolObj.id, content: err.message, is_error: true }],
+        timestamp: new Date().toISOString()
+      }]);
+    } finally {
+      setActiveToolExecution(null);
+    }
+  }, [aiMessages]);
+
+  const sendAiMessageFollowUp = async (messagesHistory) => {
+    setAiStreaming(true);
+    setAiTokens('Analyzing execution results...');
+    
+    try {
+      aiAbortRef.current = new AbortController();
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messagesHistory,
+          systemPrompt: buildSystemPrompt(buildContext()),
+          model: aiConfig.model,
+          apiKey: aiConfig.apiKey,
+        }),
+        signal: aiAbortRef.current.signal,
+      });
+
+      if (!res.ok) throw new Error('Follow-up failed');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === 'token') {
+              // Clear 'Analyzing...' on first real token
+              if (fullText === '') setAiTokens(''); 
+              fullText += evt.text;
+              setAiTokens(fullText);
+            } else if (evt.type === 'done') {
+              setAiTotalTokens(prev => prev + (evt.usage?.totalTokens || 0));
+            }
+          } catch {}
+        }
+      }
+
+      setAiMessages(prev => {
+        // Find existing history, append the new assistant response
+        return [...messagesHistory, { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }];
+      });
+    } catch(err) {
+      if (err.name !== 'AbortError') console.error('Follow-up error:', err);
+    } finally {
+      setAiStreaming(false);
+      setAiTokens('');
+    }
+  };
+
+  const stopAiStream = useCallback(() => {
+    aiAbortRef.current?.abort();
+    setAiStreaming(false);
+    if (aiTokens) {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: aiTokens + '\n\n*[Response stopped]*', timestamp: new Date().toISOString() }]);
+      setAiTokens('');
+    }
+  }, [aiTokens]);
+
+  const clearAiChat = useCallback(() => {
+    setAiMessages([]);
+    setAiTotalTokens(0);
+  }, []);
+
+  const maskApiKey = (key) => {
+    if (!key || key.length < 12) return key || '';
+    return key.slice(0, 7) + '••••••••' + key.slice(-4);
+  };
 
   const saveProcessedFile = async (filename) => {
      if (!editorRef.current) return;
@@ -284,11 +751,19 @@ export default function App() {
   const processFile = async (filename) => {
     setProcessing(prev => ({ ...prev, [filename]: 'processing' }));
     try {
-      await axios.post(`http://localhost:8080/process?filename=${filename}`);
+      // Detect if this is a folder (dataset with multiple ROOT files)
+      const fileEntry = downloaded.find(f => f.filename === filename);
+      const isFolder = fileEntry && fileEntry.type === 'folder';
+
+      if (isFolder) {
+        await axios.post(`http://localhost:8080/process/folder?folder=${encodeURIComponent(filename)}`);
+      } else {
+        await axios.post(`http://localhost:8080/process?filename=${encodeURIComponent(filename)}`);
+      }
       
       const interval = setInterval(async () => {
         try {
-          const res = await axios.get(`http://localhost:8080/process/status?filename=${filename}`);
+          const res = await axios.get(`http://localhost:8080/process/status?filename=${encodeURIComponent(filename)}`);
           const status = res.data.status;
           setProcessing(prev => ({ ...prev, [filename]: status }));
           if (status === 'processed' || status === 'error') {
@@ -363,21 +838,31 @@ export default function App() {
     }
 
     setLoading(true);
-    // Fetch depending on the selected experiment
+    // Fetch depending on the selected experiment with pagination
     if (experiment === 'All') {
       Promise.all([
-        axios.get('http://localhost:8080/datasets?experiment=ALICE'),
+        axios.get(`http://localhost:8080/datasets?experiment=ALICE&page=${page}&size=20`),
         axios.get('http://localhost:8080/datasets?experiment=CMS')
       ])
         .then(([resAlice, resCms]) => {
-          setDatasets([...resAlice.data, ...resCms.data]);
+          const aliceData = resAlice.data.datasets || resAlice.data;
+          const cmsData = resCms.data.datasets || resCms.data;
+          setDatasets([...aliceData, ...cmsData]);
+          setTotalPages(resAlice.data.pages || 1);
+          setTotalDatasets((resAlice.data.total || 0) + (cmsData.length || 0));
           setLoading(false);
         })
         .catch(() => setLoading(false));
     } else {
       const expParam = experiment === 'Alice' ? 'ALICE' : experiment;
-      axios.get(`http://localhost:8080/datasets?experiment=${expParam}`)
-        .then(r => { setDatasets(r.data); setLoading(false); })
+      axios.get(`http://localhost:8080/datasets?experiment=${expParam}&page=${page}&size=20`)
+        .then(r => {
+          const data = r.data;
+          setDatasets(data.datasets || data);
+          setTotalPages(data.pages || 1);
+          setTotalDatasets(data.total || (data.datasets || data).length);
+          setLoading(false);
+        })
         .catch(() => setLoading(false));
     }
 
@@ -385,10 +870,18 @@ export default function App() {
       .then(r => setDownloaded(r.data))
       .catch(() => {});
       
-  }, [experiment]);
+  }, [experiment, page]);
 
   const handleDownload = async (dataset, e) => {
     if (e) triggerDownloadAnimation(e);
+    
+    // Multi-file dataset: open file picker
+    if (dataset.files.length > 1) {
+      setFilePicker({ dataset, selectedFiles: new Set(dataset.files) });
+      return;
+    }
+    
+    // Single file: download directly
     const file = dataset.files[0];
     const filename = file.split('/').pop();
     setDownloading(prev => ({ ...prev, [filename]: { progress: 0, status: 'downloading', dataset } }));
@@ -424,6 +917,54 @@ export default function App() {
         // tracking error
       }
     }, 500);
+  };
+
+  const handleMultiDownload = async () => {
+    if (!filePicker) return;
+    const { dataset, selectedFiles } = filePicker;
+    const files = Array.from(selectedFiles);
+    setFilePicker(null);
+
+    try {
+      const res = await axios.post('http://localhost:8080/download/multi', {
+        dataset_title: dataset.title,
+        files: files,
+      });
+      const folder = res.data.folder;
+      for (const f of res.data.files) {
+        setDownloading(prev => ({
+          ...prev,
+          [f.track_key]: { progress: 0, status: 'downloading', dataset }
+        }));
+        // Track individual file progress
+        const trackKey = f.track_key;
+        const interval = setInterval(async () => {
+          try {
+            const r = await axios.get(`http://localhost:8080/download/status?filename=${trackKey}`);
+            setDownloading(prev => {
+              if (!prev[trackKey]) return prev;
+              return { ...prev, [trackKey]: { ...prev[trackKey], progress: r.data.progress, status: r.data.status } };
+            });
+            if (r.data.status === 'done' || r.data.status === 'error') {
+              clearInterval(interval);
+              setDownloading(prev => { const n = { ...prev }; delete n[trackKey]; return n; });
+              const files = await axios.get('http://localhost:8080/files');
+              setDownloaded(files.data);
+            }
+          } catch (e) {}
+        }, 500);
+      }
+    } catch (e) {
+      console.error('Multi-download failed:', e);
+    }
+  };
+
+  const toggleFileInPicker = (url) => {
+    if (!filePicker) return;
+    const newSet = new Set(filePicker.selectedFiles);
+    if (newSet.has(url)) newSet.delete(url);
+    else newSet.add(url);
+    setFilePicker({ ...filePicker, selectedFiles: newSet });
   };
 
   const isDownloaded = (dataset) => {
@@ -471,6 +1012,7 @@ export default function App() {
             { id: 'downloaded', label: 'Local Storage', icon: <IconFolder /> },
             { id: 'workspace', label: 'IDE Workspace', icon: <IconFile /> },
             { id: 'visualize', label: 'Visualization', icon: <IconEye /> },
+            { id: 'ai', label: 'AI Analysis', icon: <IconAI /> },
             { id: 'about', label: 'About', icon: <IconInfo /> }
           ].map(tab => (
             <button
@@ -672,10 +1214,10 @@ export default function App() {
 
                 {/* Experiment Filter */}
                 <div style={{ display: 'flex', background: '#131317', padding: '4px', borderRadius: '8px', border: '1px solid #232328' }}>
-                  {['All', 'CMS', 'Alice'].map(exp => (
+                  {['All', 'CMS', 'Alice', 'ATLAS'].map(exp => (
                     <button
                       key={exp}
-                      onClick={() => setExperiment(exp)}
+                      onClick={() => { setExperiment(exp); setPage(1); }}
                       style={{
                         padding: '6px 16px',
                         borderRadius: '6px',
@@ -814,6 +1356,56 @@ export default function App() {
                   })}
                 </div>
               )}
+
+              {/* Pagination Controls */}
+              {!loading && totalPages > 1 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '16px', marginTop: '32px', paddingTop: '24px',
+                  borderTop: '1px solid #1f1f26'
+                }}>
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    style={{
+                      padding: '8px 20px', borderRadius: '6px', border: '1px solid #232328',
+                      cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: 500,
+                      color: page <= 1 ? '#4b5563' : '#f3f4f6',
+                      background: page <= 1 ? '#131317' : '#1e1e24',
+                      opacity: page <= 1 ? 0.5 : 1,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    ← Previous
+                  </button>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', color: '#9ca3af', fontWeight: 500 }}>
+                      Page {page} of {totalPages}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                      ({totalDatasets} datasets)
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    style={{
+                      padding: '8px 20px', borderRadius: '6px', border: '1px solid #232328',
+                      cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: '13px', fontWeight: 500,
+                      color: page >= totalPages ? '#4b5563' : '#f3f4f6',
+                      background: page >= totalPages ? '#131317' : '#1e1e24',
+                      opacity: page >= totalPages ? 0.5 : 1,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -872,27 +1464,27 @@ export default function App() {
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <button
                                 onClick={() => (pStatus === 'idle' || pStatus === 'error') ? processFile(f.filename) : null}
-                                disabled={pStatus === 'processing' || pStatus === 'processed'}
+                                disabled={pStatus === 'processing' || pStatus === 'processed' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting'}
                                 style={{ 
                                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                                   background: pStatus === 'processed' ? '#059669' : 
                                               pStatus === 'error' ? '#dc2626' : 
-                                              pStatus === 'processing' ? '#3b82f6' : 'transparent',
+                                              (pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting') ? '#3b82f6' : 'transparent',
                                   border: `1px solid ${pStatus === 'idle' ? '#374151' : 'transparent'}`,
                                   color: pStatus === 'idle' ? '#d1d5db' : '#ffffff', 
                                   padding: '4px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                                  cursor: (pStatus === 'processing' || pStatus === 'processed') ? 'not-allowed' : 'pointer',
+                                  cursor: (pStatus === 'processing' || pStatus === 'processed' || pStatus.startsWith?.('processing ') || pStatus === 'merging') ? 'not-allowed' : 'pointer',
                                   transition: 'all 0.15s ease',
-                                  opacity: pStatus === 'processing' ? 0.8 : 1
+                                  opacity: (pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging') ? 0.8 : 1
                                 }}
                               >
-                                {pStatus === 'processing' ? (
+                                {(pStatus === 'processing' || pStatus.startsWith?.('processing ') || pStatus === 'merging' || pStatus === 'extracting') ? (
                                   <>
                                     <svg className="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                        <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
                                        <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff"></path>
                                     </svg>
-                                    PROCESSING
+                                    {pStatus === 'merging' ? 'MERGING' : pStatus === 'extracting' ? 'EXTRACTING' : pStatus.startsWith?.('processing ') ? pStatus.split(':')[0].toUpperCase() : 'PROCESSING'}
                                   </>
                                 ) : pStatus === 'processed' ? (
                                   <>
@@ -904,7 +1496,7 @@ export default function App() {
                                   </>
                                 ) : (
                                   <>
-                                    <IconCpu /> PROCESS
+                                    <IconCpu /> {f.type === 'folder' ? 'PROCESS ALL' : 'PROCESS'}
                                   </>
                                 )}
                               </button>
@@ -1218,6 +1810,297 @@ export default function App() {
           )}
 
           {/* About Tab */}
+          {activeTab === 'ai' && (
+            <div className="ai-chat-container" style={{ height: 'calc(100vh - 60px)', margin: '-32px -48px', padding: 0 }}>
+              {/* Gear icon, top right */}
+              <button className="ai-chat-gear-btn" onClick={() => setAiShowSettings(true)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+
+              {/* Empty state — centered input */}
+              {aiMessages.length === 0 && !aiStreaming ? (
+                <div className="ai-chat-welcome">
+                  <svg className="ai-chat-welcome-icon" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="1.5">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                    <polyline points="2 17 12 22 22 17"/>
+                    <polyline points="2 12 12 17 22 12"/>
+                  </svg>
+
+                  <div className="ai-chat-input-centered">
+                    <div className="ai-chat-input-box">
+                      <textarea
+                        ref={aiTextareaRef}
+                        className="ai-chat-textarea"
+                        value={aiInputValue}
+                        onChange={(e) => {
+                          setAiInputValue(e.target.value);
+                          setAiError('');
+                          e.target.style.height = 'auto';
+                          e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendAiMessage(aiInputValue);
+                          }
+                        }}
+                        placeholder="Ask about your physics data..."
+                        rows={1}
+                      />
+                      <div className="ai-chat-input-toolbar">
+                        <div className="ai-chat-toolbar-left">
+                          <select
+                            className="ai-chat-model-select"
+                            value={aiConfig.model}
+                            onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
+                          >
+                            {aiModels.map(m => (
+                              <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          className="ai-chat-send-btn"
+                          onClick={() => sendAiMessage(aiInputValue)}
+                          disabled={!aiInputValue.trim()}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    {aiError && (
+                      <div className="ai-chat-inline-error">{aiError}</div>
+                    )}
+
+                    <div className="ai-chat-suggestions">
+                      {AI_SUGGESTIONS.map((s, i) => (
+                        <button key={i} className="ai-chat-suggestion" onClick={() => sendAiMessage(s)}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Conversation mode */
+                <>
+                  <div className="ai-chat-messages">
+                    {aiMessages.map((msg, i) => {
+                      // Filter out user tool_result blocks so they don't render ugly JSON in chat
+                      if (msg.role === 'user' && Array.isArray(msg.content) && msg.content[0]?.type === 'tool_result') {
+                        return null;
+                      }
+                      
+                      return (
+                        <div key={i} className={`ai-chat-message ai-chat-message-\${msg.role}`}>
+                          <div className={`ai-chat-bubble ai-chat-bubble-\${msg.role}`} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {Array.isArray(msg.content) ? (
+                              msg.content.map((block, j) => {
+                                if (block.type === 'text') {
+                                  return <div key={j}>{renderAIMarkdown(block.text)}</div>;
+                                } else if (block.type === 'tool_use') {
+                                  // RENDER TOOL EXECUTION CARD
+                                  let codeStr = '';
+                                  if (block.name === 'execute_python') codeStr = block.input.code;
+                                  else if (block.name === 'execute_bash') codeStr = block.input.command;
+                                  else if (block.name === 'opencern_cli') codeStr = 'opencern ' + block.input.args;
+                                  
+                                  const getStatusColor = (s) => {
+                                    if (s === 'success') return '#10b981';
+                                    if (s === 'failed' || s === 'denied') return '#ef4444';
+                                    if (s === 'running') return '#3b82f6';
+                                    return '#f59e0b';
+                                  };
+
+                                  return (
+                                    <div key={j} style={{ background: '#08080a', border: '1px solid #232328', borderRadius: '8px', overflow: 'hidden' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#131317', borderBottom: '1px solid #232328' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#9ca3af', fontFamily: 'var(--font-geist-mono), monospace' }}>
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+                                          {block.name}
+                                        </div>
+                                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: getStatusColor(block.status) }}>
+                                          {block.status?.toUpperCase() || 'PENDING APPROVAL'}
+                                        </div>
+                                      </div>
+                                      
+                                      <div style={{ padding: '12px', overflowX: 'auto', background: '#000', fontSize: '12px', fontFamily: 'var(--font-geist-mono), Consolas, monospace', color: '#d1d5db', whiteSpace: 'pre-wrap' }}>
+                                        {codeStr}
+                                      </div>
+
+                                      {block.status === 'pending' && (
+                                        <div style={{ display: 'flex', gap: '8px', padding: '8px 12px', background: '#131317', borderTop: '1px solid #232328' }}>
+                                          <button 
+                                            onClick={() => handleToolAction(i, j, block, 'approve')}
+                                            style={{ flex: 1, background: '#10b981', color: '#000', border: 'none', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                          >
+                                            Approve & Run
+                                          </button>
+                                          <button 
+                                            onClick={() => handleToolAction(i, j, block, 'deny')}
+                                            style={{ flex: 1, background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                          >
+                                            Deny
+                                          </button>
+                                        </div>
+                                      )}
+
+                                      {(block.status === 'success' || block.status === 'failed') && block.output && (
+                                        <div style={{ padding: '8px 12px', background: '#0a0a0c', borderTop: '1px solid #232328', fontSize: '11px', fontFamily: 'var(--font-geist-mono), monospace', color: block.status === 'success' ? '#9ca3af' : '#ef4444', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                                          {block.output}
+                                        </div>
+                                      )}
+
+                                      {/* Inline image rendering from executed scripts */}
+                                      {block.images && block.images.map((imgSrc, imgIdx) => (
+                                        <div key={imgIdx} style={{ padding: '12px', background: '#fff', borderTop: '1px solid #232328' }}>
+                                          <img src={imgSrc} alt="Generated output" style={{ maxWidth: '100%', height: 'auto', borderRadius: '4px' }} />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })
+                            ) : (
+                              msg.role === 'assistant' ? renderAIMarkdown(msg.content) : msg.content
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {aiStreaming && aiTokens && (
+                      <div className="ai-chat-message ai-chat-message-assistant">
+                        <div className="ai-chat-bubble ai-chat-bubble-assistant">
+                          {renderAIMarkdown(aiTokens)}
+                          <span className="ai-chat-cursor"></span>
+                        </div>
+                      </div>
+                    )}
+
+                    {aiStreaming && !aiTokens && (
+                      <div className="ai-chat-message ai-chat-message-assistant">
+                        <div className="ai-chat-thinking">
+                          <div className="ai-chat-thinking-dots">
+                            <div className="ai-chat-thinking-dot"></div>
+                            <div className="ai-chat-thinking-dot"></div>
+                            <div className="ai-chat-thinking-dot"></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={aiMessagesEndRef} />
+                  </div>
+
+                  {aiStreaming && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0' }}>
+                      <button className="ai-chat-stop-btn" onClick={stopAiStream}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                        Stop
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="ai-chat-input-bottom">
+                    <div className="ai-chat-input-centered">
+                      <div className="ai-chat-input-box">
+                        <textarea
+                          ref={aiTextareaRef}
+                          className="ai-chat-textarea"
+                          value={aiInputValue}
+                          onChange={(e) => {
+                            setAiInputValue(e.target.value);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              sendAiMessage(aiInputValue);
+                            }
+                          }}
+                          placeholder="Ask a follow-up..."
+                          rows={1}
+                          disabled={aiStreaming}
+                        />
+                        <div className="ai-chat-input-toolbar">
+                          <div className="ai-chat-toolbar-left">
+                            <select
+                              className="ai-chat-model-select"
+                              value={aiConfig.model}
+                              onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })}
+                            >
+                              {aiModels.map(m => (
+                                <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            className="ai-chat-send-btn"
+                            onClick={() => sendAiMessage(aiInputValue)}
+                            disabled={!aiInputValue.trim() || aiStreaming}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="ai-chat-input-footer">
+                        <span style={{ color: '#444', fontSize: '11px' }}>Shift+Enter for new line</span>
+                        <button
+                          onClick={clearAiChat}
+                          style={{ background: 'none', border: 'none', color: '#444', cursor: 'pointer', fontSize: '11px' }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#777'}
+                          onMouseLeave={e => e.currentTarget.style.color = '#444'}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Settings Panel */}
+              {aiShowSettings && (
+                <div className="ai-chat-settings-overlay" onClick={() => setAiShowSettings(false)}>
+                  <div className="ai-chat-settings-panel" onClick={e => e.stopPropagation()}>
+                    <div className="ai-chat-settings-header">
+                      <h3>Settings</h3>
+                      <button className="ai-chat-settings-close" onClick={() => setAiShowSettings(false)}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+
+                    <div className="ai-chat-settings-body">
+                        <div className="ai-chat-settings-group">
+                          <label>API Key</label>
+                          <input
+                            className="ai-chat-settings-input"
+                            type="password"
+                            value={aiConfig.apiKey}
+                            onChange={(e) => setAiConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                            placeholder="sk-ant-api03-..."
+                            autoComplete="off"
+                          />
+                          <div className="ai-chat-hint">
+                            Pay-per-token. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Get a key →</a>
+                          </div>
+                        </div>
+                    </div>
+
+                    <div className="ai-chat-settings-footer">
+                      <button className="ai-chat-settings-save" onClick={() => { saveAiConfig(aiConfig); setAiShowSettings(false); }}>
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'about' && (
             <div style={{ maxWidth: '640px', margin: '40px auto 0 auto', background: '#131317', padding: '48px', borderRadius: '12px', border: '1px solid #232328', textAlign: 'center' }}>
               <div style={{ display: 'flex', justifyContent: 'center', color: '#f3f4f6', marginBottom: '24px' }}>
@@ -1239,6 +2122,112 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* File Picker Modal */}
+      {filePicker && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setFilePicker(null)}>
+          <div style={{
+            background: '#18181b', border: '1px solid #2a2a2e', borderRadius: '12px',
+            width: '560px', maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+          }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #232328' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#f3f4f6', fontWeight: 600 }}>
+                Select Files to Download
+              </h3>
+              <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#9ca3af' }}>
+                {filePicker.dataset.title}
+              </p>
+            </div>
+
+            {/* Controls */}
+            <div style={{
+              padding: '12px 24px', display: 'flex', gap: '12px', fontSize: '12px',
+              borderBottom: '1px solid #1f1f26',
+            }}>
+              <button onClick={() => setFilePicker({ ...filePicker, selectedFiles: new Set(filePicker.dataset.files) })}
+                style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '12px' }}>
+                Select All
+              </button>
+              <button onClick={() => setFilePicker({ ...filePicker, selectedFiles: new Set() })}
+                style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '12px' }}>
+                Select None
+              </button>
+              <span style={{ marginLeft: 'auto', color: '#6b7280' }}>
+                {filePicker.selectedFiles.size} of {filePicker.dataset.files.length} selected
+              </span>
+            </div>
+
+            {/* File List */}
+            <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
+              {filePicker.dataset.files.map((url, i) => {
+                const name = url.split('/').pop();
+                const isChecked = filePicker.selectedFiles.has(url);
+                return (
+                  <div key={i}
+                    onClick={() => toggleFileInPicker(url)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '10px 24px', cursor: 'pointer',
+                      background: isChecked ? 'rgba(59,130,246,0.08)' : 'transparent',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = isChecked ? 'rgba(59,130,246,0.12)' : '#1f1f26'}
+                    onMouseLeave={e => e.currentTarget.style.background = isChecked ? 'rgba(59,130,246,0.08)' : 'transparent'}
+                  >
+                    <div style={{
+                      width: '18px', height: '18px', borderRadius: '4px', flexShrink: 0,
+                      border: isChecked ? '2px solid #3b82f6' : '2px solid #4b5563',
+                      background: isChecked ? '#3b82f6' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}>
+                      {isChecked && <span style={{ color: '#fff', fontSize: '11px', fontWeight: 700 }}>✓</span>}
+                    </div>
+                    <span style={{
+                      fontSize: '13px', color: '#e5e7eb',
+                      fontFamily: 'var(--font-geist-mono), monospace',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                    }}>
+                      {name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '16px 24px', borderTop: '1px solid #232328',
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px',
+            }}>
+              <button onClick={() => setFilePicker(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', fontSize: '13px', fontWeight: 500,
+                  border: '1px solid #232328', background: '#131317', color: '#9ca3af', cursor: 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button onClick={handleMultiDownload}
+                disabled={filePicker.selectedFiles.size === 0}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', fontSize: '13px', fontWeight: 500,
+                  border: 'none', cursor: filePicker.selectedFiles.size === 0 ? 'not-allowed' : 'pointer',
+                  background: filePicker.selectedFiles.size === 0 ? '#1e1e24' : '#2563eb',
+                  color: filePicker.selectedFiles.size === 0 ? '#4b5563' : '#fff',
+                  transition: 'all 0.15s',
+                }}>
+                Download {filePicker.selectedFiles.size} File{filePicker.selectedFiles.size !== 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

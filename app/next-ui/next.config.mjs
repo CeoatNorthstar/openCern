@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@monaco-editor/react", "@monaco-editor/loader"],
-  serverExternalPackages: ["monaco-editor"],
+  output: 'standalone',
+  images: { unoptimized: true },
+  serverExternalPackages: ["monaco-editor", "@monaco-editor/react", "@monaco-editor/loader"],
 };
 
 export default nextConfig;

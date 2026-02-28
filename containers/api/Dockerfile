@@ -1,22 +1,44 @@
-FROM python:3.12-slim
+# ══════════════════════════════════════════════════════════════════
+# OpenCERN API Container — with embedded C++ ROOT processor
+# Uses ROOT image as base (has Python 3.x + all ROOT C++ libs)
+# ══════════════════════════════════════════════════════════════════
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y curl docker.io && rm -rf /var/lib/apt/lists/*
+FROM --platform=linux/amd64 rootproject/root:6.32.02-ubuntu24.04
 
-# Set up non-root user
-RUN useradd -m -u 1000 appuser
+# Install build tools and Python pip
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    cmake \
+    g++ \
+    make \
+    python3-pip \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
 
+# ── Build the C++ processor ──
+WORKDIR /build
+COPY containers/cpp-processor/CMakeLists.txt .
+COPY containers/cpp-processor/src/ src/
+
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build -j$(nproc) \
+    && cmake --install build --prefix /usr/local \
+    && rm -rf /build
+
+# ── Set up the Python API ──
+RUN useradd -m -o -u 1000 appuser 2>/dev/null || true
 WORKDIR /app
 
-# Install Python requirements
-RUN pip install --no-cache-dir fastapi uvicorn httpx requests pydantic python-multipart aiofiles
+RUN pip install --no-cache-dir --break-system-packages \
+    fastapi uvicorn httpx requests pydantic python-multipart aiofiles
 
-# Copy the application code
-COPY main.py .
+COPY containers/api/main.py containers/api/config.py containers/api/models.py ./
+COPY containers/api/routers/ ./routers/
+COPY containers/api/services/ ./services/
 
-# Change ownership
 RUN chown -R appuser:appuser /app
 USER appuser
+ENV HOME=/home/appuser
 
 EXPOSE 8080
 

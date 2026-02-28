@@ -10,17 +10,28 @@ const http = require('http')
 
 let win;
 
+// Full PATH that covers Docker on all macOS installations
+const DOCKER_PATH = [
+  '/usr/local/bin',
+  '/opt/homebrew/bin',
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+  '/Applications/Docker.app/Contents/Resources/bin',
+  process.env.PATH || '',
+].join(':');
+
 process.on('uncaughtException', (err) => {
-  console.error("FATAL UNCAUGHT:", err);
+  console.error("FATAL:", err);
 });
 
-// Enforce single instance lock so deep links route to the existing window
 const gotTheLock = app ? app.requestSingleInstanceLock() : false;
 
 if (!gotTheLock) {
   if (app) app.quit()
 } else {
-  // Register opencern:// protocol
+  // Protocol registration
   if (process.defaultApp) {
     if (process.argv.length >= 2) {
       app.setAsDefaultProtocolClient('opencern', process.execPath, [path.resolve(process.argv[1])])
@@ -28,152 +39,166 @@ if (!gotTheLock) {
   } else {
     app.setAsDefaultProtocolClient('opencern')
   }
-  app.on('second-instance', (event, commandLine, workingDirectory) => {
-    // Windows/Linux deep link handler
+
+  app.on('second-instance', (event, commandLine) => {
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
-      
       const url = commandLine.pop()
-      if (url.startsWith('opencern://')) {
+      if (url && url.startsWith('opencern://')) {
         win.webContents.send('sso-auth-callback', url)
       }
     }
   })
 
-  async function checkDocker() {
+  // ── Helpers ──
+
+  function dockerEnv() {
+    return { ...process.env, PATH: DOCKER_PATH };
+  }
+
+  function composePath() {
+    return app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
+  }
+
+  function runDocker(args) {
     return new Promise((resolve) => {
-      exec('docker info', { env: { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' } }, (error) => resolve(!error));
+      const cmd = `docker compose -p opencern ${args}`;
+      console.log(`[Docker] ${cmd}`);
+      exec(cmd, { cwd: composePath(), env: dockerEnv(), timeout: 300000 }, (err, stdout, stderr) => {
+        if (stdout) console.log(`[Docker] ${stdout.trim()}`);
+        if (stderr) console.log(`[Docker] ${stderr.trim()}`);
+        if (err)    console.error(`[Docker] Error: ${err.message}`);
+        resolve(!err);
+      });
     });
   }
 
-  function showLoadingWindow() {
-    const loadWin = new BrowserWindow({
-      width: 900, height: 600, frame: false, transparent: true, backgroundColor: '#080b14', alwaysOnTop: true,
-      webPreferences: { nodeIntegration: true, webSecurity: false }
+  async function isDockerRunning() {
+    return new Promise((resolve) => {
+      exec('docker info', { env: dockerEnv(), timeout: 10000 }, (err) => resolve(!err));
     });
-    
-    // We must load an actual local HTML file or construct a data URI 
-    // that has the correct privileges to load local file:// resources.
-    // The safest way is to use a Data URL but encode the video as absolute path.
-    const videoPath = app.isPackaged 
-        ? path.join(process.resourcesPath, 'media/videos/startup_video/720p30/StartupLogo.mp4')
-        : path.join(__dirname, '../../../../app/electron/media/videos/startup_video/720p30/StartupLogo.mp4');
-
-    const videoUrl = 'file://' + videoPath.replace(/\\/g, '/');
-
-    const htmlContent = `
-      <body style="font-family: sans-serif; background: #080b14; color: white; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0; overflow:hidden;">
-        <video width="900" height="600" autoplay loop muted playsinline style="object-fit: cover;">
-            <source src="${videoUrl}" type="video/mp4">
-        </video>
-        <div style="position: absolute; bottom: 20px; display: flex; flex-direction: column; align-items: center;">
-            <p style="color:#9ca3af; font-size:13px; margin-bottom:8px; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">Starting isolated physics environments...</p>
-            <div style="width:20px; height:20px; border:2px solid #1f2937; border-top:2px solid #3b82f6; border-radius:50%; animation: spin 1s linear infinite;"></div>
-        </div>
-        <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
-      </body>`;
-      
-    loadWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
-    return loadWin;
   }
 
-  async function pollHealth(timeoutMs=30000) {
+  async function waitForPort(port, timeoutMs = 90000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      try {
-        const ok = await new Promise((resolve) => {
-          const req = http.get('http://127.0.0.1:8080/health', (res) => {
-            resolve(res.statusCode === 200);
-          });
-          req.on('error', () => resolve(false));
+      const ok = await new Promise((resolve) => {
+        const req = http.get(`http://127.0.0.1:${port}`, (res) => {
+          resolve(res.statusCode >= 200 && res.statusCode < 500);
         });
-        if (ok) return true;
-      } catch(e) {}
-      await new Promise(r => setTimeout(r, 500));
+        req.on('error', () => resolve(false));
+        req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+      });
+      if (ok) return true;
+      await new Promise(r => setTimeout(r, 1000));
     }
     return false;
   }
 
-  async function createWindow() {
-    win = new BrowserWindow({
-      width: 1400,
-      height: 900,
-      titleBarStyle: 'hiddenInset',
-      backgroundColor: '#080b14',
-      show: false, // hide initially securely
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false, 
-      },
-    })
+  // ── Splash ──
 
-    console.log("Checking for Docker presence...");
-    const hasDocker = await checkDocker();
-    console.log("Docker presence resolved:", hasDocker);
-    if (!hasDocker) {
-      dialog.showErrorBox("Docker Required", "OpenCERN requires Docker Desktop to containerize its physics simulation backends. Please install and launch Docker Desktop to proceed.");
+  function showSplash() {
+    const loadWin = new BrowserWindow({
+      width: 900, height: 600, frame: false, transparent: true,
+      backgroundColor: '#080b14', alwaysOnTop: true,
+      webPreferences: { nodeIntegration: true, webSecurity: false }
+    });
+
+    const videoPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'media/videos/startup_video/720p30/StartupLogo.mp4')
+      : path.join(__dirname, '../../../../app/electron/media/videos/startup_video/720p30/StartupLogo.mp4');
+
+    const html = `<body style="font-family:sans-serif;background:#080b14;color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;overflow:hidden">
+      <video width="900" height="600" autoplay loop muted playsinline style="object-fit:cover"><source src="file://${videoPath.replace(/\\/g,'/')}" type="video/mp4"></video>
+      <div style="position:absolute;bottom:20px;display:flex;flex-direction:column;align-items:center">
+        <p id="s" style="color:#9ca3af;font-size:13px;margin-bottom:8px;text-shadow:0 2px 4px rgba(0,0,0,.8)">Starting physics environments…</p>
+        <div style="width:20px;height:20px;border:2px solid #1f2937;border-top:2px solid #3b82f6;border-radius:50%;animation:spin 1s linear infinite"></div>
+      </div>
+      <style>@keyframes spin{100%{transform:rotate(360deg)}}</style></body>`;
+
+    loadWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    return loadWin;
+  }
+
+  // ── Main ──
+
+  async function createWindow() {
+    console.log("=== OpenCERN ===");
+    console.log("Packaged:", app.isPackaged);
+    console.log("Compose dir:", composePath());
+
+    // 1. Docker check
+    const dockerOk = await isDockerRunning();
+    console.log("Docker:", dockerOk ? "OK" : "NOT RUNNING");
+    if (!dockerOk) {
+      dialog.showErrorBox("Docker Required",
+        "Docker Desktop is not running.\n\nPlease start Docker Desktop and try again.");
       app.quit();
       return;
     }
 
-    const loadWin = showLoadingWindow();
-    const splashStartTime = Date.now();
+    // 2. Splash
+    const splash = showSplash();
+    await new Promise(r => setTimeout(r, 5000)); // Let video play
 
-    const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
-    
-    const env = { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' };
-    
-    // Ensure the intro video finishes playing before booting Docker
-    console.log("Waiting for video to finish prior to Docker boot...");
-    const elapsedVideo = Date.now() - splashStartTime;
-    if (elapsedVideo < 6000) {
-        await new Promise(r => setTimeout(r, 6000 - elapsedVideo));
+    // 3. Start ALL containers (frontend + API + streamer + xrootd)
+    //    Uses -p opencern so project name is always consistent
+    console.log("Starting containers...");
+    await runDocker('up -d --build');
+
+    // 4. Wait for frontend (port 3000) — this is the gate
+    console.log("Waiting for frontend (port 3000)...");
+    const frontendOk = await waitForPort(3000, 90000);
+    console.log("Frontend:", frontendOk ? "READY" : "TIMEOUT");
+
+    if (!frontendOk) {
+      splash.close();
+      dialog.showErrorBox("Startup Failed",
+        "Containers didn't start in time.\n\n" +
+        "Try running this in Terminal to debug:\n" +
+        "  docker compose -p opencern up --build\n\n" +
+        "Then restart OpenCERN.");
+      app.exit(1);
+      return;
     }
 
-    console.log("Building and Starting Containers...");
-    await new Promise((resolve) => {
-      exec('docker compose up -d --build', { cwd: composePath, env }, (err, stdout, stderr) => {
-        if (err && !app.isPackaged) {
-            console.warn("Docker compose up warning:", err);
-        }
-        resolve();
-      });
+    // 5. Also wait for API (port 8080)
+    console.log("Waiting for API (port 8080)...");
+    const apiOk = await waitForPort(8080, 30000);
+    console.log("API:", apiOk ? "READY" : "TIMEOUT (continuing anyway)");
+
+    // 6. Show main window
+    win = new BrowserWindow({
+      width: 1400, height: 900,
+      titleBarStyle: 'hiddenInset',
+      backgroundColor: '#080b14',
+      show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
     });
 
-    console.log("Entering healthcheck polling loop...");
-    // Block the renderer URL from loading until the Python FastAPI healthcheck succeeds
-    const isHealthy = await pollHealth();
-    console.log("Healthcheck loop unblocked. isHealthy:", isHealthy);
-    if (!isHealthy) {
-       loadWin.close();
-       dialog.showErrorBox("Backend Timeout", "The physics microservices failed to boot within 30 seconds. Please check Docker or restart OpenCERN.");
-       app.exit(1);
-       return;
-    }
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        shell.openExternal(url);
+      }
+      return { action: 'deny' };
+    });
 
-    loadWin.close();
+    splash.close();
     win.show();
-    win.loadURL('http://localhost:3000')
+    win.loadURL('http://localhost:3000');
+    console.log("=== Ready ===");
   }
 
-  app.whenReady().then(createWindow)
+  app.whenReady().then(createWindow);
 
-  // macOS deep link handler
+  // macOS deep link
   app.on('open-url', (event, url) => {
-    event.preventDefault()
+    event.preventDefault();
     if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
-      win.webContents.send('sso-auth-callback', url)
-    } else {
-      // If the app was closed and opened via deep link
-      app.whenReady().then(() => {
-        createWindow();
-        win.webContents.once('did-finish-load', () => {
-          win.webContents.send('sso-auth-callback', url);
-        });
-      });
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      win.webContents.send('sso-auth-callback', url);
     }
   })
 
@@ -181,21 +206,18 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  // Ensure Docker cleanly spins down background tasks when exiting OpenCERN
+  // Shutdown
   app.on('before-quit', (e) => {
     if (!app.isQuiting) {
       e.preventDefault();
-      const composePath = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../../../');
-      console.log("Shutting down local physics containers...");
-      const env = { ...process.env, PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin' };
-      exec('docker compose stop', { cwd: composePath, env }, () => {
+      console.log("Shutting down containers...");
+      exec('docker compose -p opencern stop', { cwd: composePath(), env: dockerEnv() }, () => {
         app.isQuiting = true;
         app.exit(0);
       });
     }
   });
 
-  // Proxy shell.openExternal requests from Renderer
   ipcMain.on('open-external-url', (event, url) => {
     shell.openExternal(url)
   })

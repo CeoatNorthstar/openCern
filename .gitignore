@@ -22,3 +22,8 @@ app/electron/media/videos/
 
 # Rust compilation targets
 containers/streaming/target/
+__pycache__/
+*.pyc
+
+# Electron build output
+per-nothing/
