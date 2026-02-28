@@ -11,7 +11,7 @@ import { platform } from 'os';
 import axios from 'axios';
 import { setKey, deleteKey, getKey } from '../utils/keystore.js';
 
-const CLI_AUTH_BASE = '';
+const CLI_AUTH_BASE = 'https://opencern-cli-auth.a-contactnaol.workers.dev';
 
 export interface LoginResult {
   success: boolean;
@@ -44,7 +44,7 @@ export async function login(
   }
 
   const { code } = initResult;
-  const authUrl = `/auth/cli?code=${code}`;
+  const authUrl = `${CLI_AUTH_BASE}/auth/cli?code=${code}`;
 
   openBrowser(authUrl);
   onCode(code, authUrl);
