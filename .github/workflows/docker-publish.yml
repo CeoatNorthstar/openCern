@@ -20,16 +20,16 @@ jobs:
       matrix:
         service:
           - name: api
-            context: containers/api
+            context: .
             dockerfile: containers/api/Dockerfile
           - name: xrootd
-            context: containers/xrootd
+            context: .
             dockerfile: containers/xrootd/Dockerfile
           - name: streamer
-            context: containers/streaming
+            context: .
             dockerfile: containers/streaming/Dockerfile
           - name: quantum
-            context: opencern-cli/quantum
+            context: .
             dockerfile: opencern-cli/quantum/Dockerfile
 
     steps:
