@@ -33,7 +33,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Fix package.json
+        run: npm pkg fix
+
       - name: Publish to npm
+        # NPM_TOKEN must be a granular access token with Automation auth setting to bypass OTP
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
